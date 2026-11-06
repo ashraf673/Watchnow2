@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Watchnow</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#0f172a" />
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen">
+      <div class="login-container">
+        <div class="logo">
+          <div class="logo-icon">👁</div>
+          <h1>Watchnow</h1>
+          <p>Live camera & location viewer</p>
+        </div>
+        <button id="google-login-btn" class="btn btn-primary">
+          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" />
+          Continue with Google
+        </button>
+        <div class="or-divider">or</div>
+        <button id="activation-login-btn" class="btn btn-secondary">Login with Activation Code</button>
+        <div id="activation-input-box" class="hidden" style="margin-top:16px;">
+          <input type="text" id="activation-code-input" placeholder="Enter activation code" class="input-field" />
+          <button id="activation-submit-btn" class="btn btn-primary" style="margin-top:10px;">Continue</button>
+        </div>
+        <p class="note">First time? Use Google. Later you can use Activation Code.</p>
+      </div>
+    </div>
+
+    <!-- Device List Screen -->
+    <div id="devices-screen" class="screen hidden">
+      <header class="app-header">
+        <h2>Watchnow</h2>
+        <div>
+          <button id="settings-btn" class="btn-icon" title="Settings">⚙️</button>
+          <button id="logout-btn" class="btn-icon" title="Logout">⎋</button>
+        </div>
+      </header>
+
+      <div class="content">
+        <div class="section-title">Your Remote Devices</div>
+        <div id="devices-list" class="devices-list">
+          <div class="empty-state" id="empty-state">
+            <p>No devices found</p>
+            <small>Install Partypark on another phone and activate with your code</small>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Screen -->
+    <div id="settings-screen" class="screen hidden">
+      <header class="app-header">
+        <button id="settings-back-btn" class="btn-icon">←</button>
+        <h2>Settings</h2>
+        <div></div>
+      </header>
+      <div class="content">
+        <div class="section-title">Account Information</div>
+        <div class="card">
+          <div class="label">Activation Code</div>
+          <div class="activation-row">
+            <span id="activation-code-display" class="activation-code">Loading...</span>
+            <button id="copy-code-btn" class="btn-icon" title="Copy">📋</button>
+          </div>
+          <p class="small-note">Save this code safely. You can use it to login on other devices without Google.</p>
+          <div id="qr-container" style="margin-top:20px; text-align:center;">
+            <canvas id="activation-qr"></canvas>
+            <p class="small-note">Scan this QR with Partypark app</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Viewer Screen -->
+    <div id="viewer-screen" class="screen hidden">
+      <header class="app-header viewer-header">
+        <button id="back-btn" class="btn-icon">←</button>
+        <h2 id="viewer-title">Live View</h2>
+        <div class="header-actions">
+          <button id="switch-camera-btn" class="btn-icon" title="Switch Camera">🔄</button>
+          <button id="flashlight-btn" class="btn-icon" title="Flashlight">💡</button>
+        </div>
+      </header>
+
+      <div class="viewer-container">
+        <video id="remote-video" autoplay playsinline muted></video>
+        <div id="no-stream" class="no-stream">
+          <p>Connecting...</p>
+        </div>
+      </div>
+
+      <div class="controls-bar">
+        <button id="mic-btn" class="control-btn" title="Hold to talk">🎤</button>
+        <button id="location-btn" class="control-btn" title="Show Location">📍</button>
+        <button id="camera-off-btn" class="control-btn" title="Camera Off">📷</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-database-compat.js"></script>
+
+  <script src="js/firebase-config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
