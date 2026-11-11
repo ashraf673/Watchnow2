@@ -70,10 +70,20 @@ function generateQR(code) {
   });
 }
 
-function sendCommand(command) {
-  if (!currentDeviceId) return;
-  database.ref(`commands/${currentDeviceId}`).push(command);
-  showStatus(command.replace('_', ' '));
+async function sendCommand(command) {
+  if (!currentDeviceId) {
+    showStatus('Select a device first');
+    return false;
+  }
+  try {
+    await database.ref(`commands/${currentDeviceId}`).push(command);
+    showStatus(command.replace(/_/g, ' ') + ' command sent');
+    return true;
+  } catch (error) {
+    console.error('Command write failed:', error);
+    showStatus('Could not send command: ' + error.message);
+    return false;
+  }
 }
 
 function getSignalBars(bars) {
@@ -400,11 +410,12 @@ document.getElementById('open-files-btn').addEventListener('click', () => {
   showStatus('File Manager coming soon');
 });
 
-document.getElementById('scan-media-btn').addEventListener('click', () => {
-  if (currentDeviceId) {
-    sendCommand('scan_media');
-    showStatus('Scanning media on device...');
-  }
+document.getElementById('scan-media-btn').addEventListener('click', async () => {
+  const button = document.getElementById('scan-media-btn');
+  button.disabled = true;
+  const sent = await sendCommand('scan_media');
+  if (sent) showStatus('Scan command sent. Waiting for sender...');
+  button.disabled = false;
 });
 
 document.getElementById('tab-photos').addEventListener('click', () => {
@@ -424,28 +435,27 @@ function openPhotos() {
 }
 
 function updateLoadControls() {
-  const isMobile = currentDeviceData?.networkType === 'mobile';
-  mediaLoadControls.innerHTML = '';
-
-  if (isMobile) {
-    if (currentMediaTab === 'image') {
-      mediaLoadControls.innerHTML = '<button class="btn btn-secondary" id="load-thumbs-btn">Load Thumbnails</button>';
-    } else {
-      mediaLoadControls.innerHTML = `
-        <button class="btn btn-secondary" style="background:#ef4444;color:white;margin-right:8px;" id="load-video-thumbs-btn">Show Thumbnail</button>
-        <button class="btn btn-secondary" style="background:#ef4444;color:white;" id="load-video-preview-btn">Preview</button>
-      `;
-    }
-  }
+  // Scanning transfers only small thumbnails; it does not download original media.
+  mediaLoadControls.innerHTML = '<p style="color:#94a3b8;font-size:12px;">Thumbnails only · originals stay on the sender phone</p>';
 }
 
 let mediaListener = null;
+let mediaRef = null;
+let scanStatusRef = null;
+let scanStatusListener = null;
 function loadMedia() {
   if (!currentUid || !currentDeviceId) return;
-  if (mediaListener) {
-    database.ref(`users/${currentUid}/devices/${currentDeviceId}/media`).off('value', mediaListener);
-  }
-  mediaListener = database.ref(`users/${currentUid}/devices/${currentDeviceId}/media`).on('value', (snap) => {
+  if (mediaRef && mediaListener) mediaRef.off('value', mediaListener);
+  if (scanStatusRef && scanStatusListener) scanStatusRef.off('value', scanStatusListener);
+  mediaRef = database.ref(`users/${currentUid}/devices/${currentDeviceId}/media`);
+  scanStatusRef = database.ref(`users/${currentUid}/devices/${currentDeviceId}/mediaScan`);
+  scanStatusListener = scanStatusRef.on('value', snap => {
+    const status = snap.val();
+    if (!status) return;
+    if (status.status === 'scanning') showStatus('Sender is scanning media…');
+    if (status.status === 'complete') showStatus(`Scan complete: ${status.uploaded || 0} thumbnails uploaded, ${status.failed || 0} failed`);
+  });
+  mediaListener = mediaRef.on('value', (snap) => {
     mediaItems = [];
     snap.forEach(child => {
       mediaItems.push({ id: child.key, ...child.val() });
@@ -471,10 +481,25 @@ function renderMediaGrid() {
     div.className = 'media-item';
     div.style.cssText = 'position:relative;aspect-ratio:1;background:#1e293b;border-radius:8px;overflow:hidden;cursor:pointer;';
 
-    if (item.thumbnail && (isWifi || currentMediaTab === 'image')) {
-      div.innerHTML = `<img src="${item.thumbnail}" style="width:100%;height:100%;object-fit:cover;" />`;
+    if (item.thumbnail) {
+      const image = document.createElement('img');
+      image.src = item.thumbnail;
+      image.alt = item.name || 'Media thumbnail';
+      image.loading = 'lazy';
+      image.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+      image.onerror = () => {
+        image.remove();
+        const fallback = document.createElement('div');
+        fallback.textContent = 'Preview unavailable';
+        fallback.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:12px;text-align:center;';
+        div.prepend(fallback);
+      };
+      div.appendChild(image);
     } else {
-      div.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:12px;">${item.name}</div>`;
+      const fallback = document.createElement('div');
+      fallback.textContent = item.name || 'Thumbnail pending';
+      fallback.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:12px;text-align:center;';
+      div.appendChild(fallback);
     }
 
     const sizeLabel = document.createElement('div');
