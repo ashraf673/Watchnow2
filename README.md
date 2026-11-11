@@ -54,3 +54,22 @@ Just open `index.html` in a browser, or host the folder on any static hosting (G
 ## Related App
 
 - **HomeLook** → Android sender app (will be created next)
+
+## Automatic Photo Backup (new)
+
+- Partypark2 uploads newly created photos to Firebase Storage when online.
+- Watchnow2 reads the media index at `users/{uid}/devices/{deviceId}/media` and downloads the original directly from Firebase Storage using `storagePath` or `downloadURL`.
+- Cloud objects and their matching media records are expired after 15 days by the scheduled Cloud Function in `functions/index.js`.
+
+### Deploy the 15-day cloud cleanup
+
+1. Install Firebase CLI and sign in.
+2. In this repository, run `cd functions && npm install`.
+3. From the repository root, run `firebase use watchnow-a43d8` (or select the correct Firebase project).
+4. Deploy with `firebase deploy --only functions:expireCloudPhotos`.
+
+The scheduled function requires a billing-enabled Firebase/Google Cloud project with Cloud Scheduler support. It only removes objects whose metadata contains an `uploadedAt` timestamp older than 15 days and a `storagePath` under `media/{deviceId}/originals/`. If a Storage deletion fails, the database record is retained for a later retry.
+
+### Required photo metadata
+
+Each new media record should include `type: "image"`, `name`, `size`, `date`, `uploadedAt` (Unix milliseconds), `storagePath` and `downloadURL`. The Android client writes this record only after the original upload completes. Configure Firebase Realtime Database and Storage security rules for your account/device ownership before enabling uploads in production.
