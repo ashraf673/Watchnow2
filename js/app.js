@@ -410,14 +410,6 @@ document.getElementById('open-files-btn').addEventListener('click', () => {
   showStatus('File Manager coming soon');
 });
 
-document.getElementById('scan-media-btn').addEventListener('click', async () => {
-  const button = document.getElementById('scan-media-btn');
-  button.disabled = true;
-  const sent = await sendCommand('scan_media');
-  if (sent) showStatus('Scan command sent. Waiting for sender...');
-  button.disabled = false;
-});
-
 document.getElementById('tab-photos').addEventListener('click', () => {
   currentMediaTab = 'image';
   renderMediaGrid();
@@ -435,99 +427,88 @@ function openPhotos() {
 }
 
 function updateLoadControls() {
-  // Scanning transfers only small thumbnails; it does not download original media.
-  mediaLoadControls.innerHTML = '<p style="color:#94a3b8;font-size:12px;">Thumbnails only · originals stay on the sender phone</p>';
+  mediaLoadControls.innerHTML =
+    '<p style="color:#94a3b8;font-size:12px;">Automatic cloud backup · Cloud copies are retained for 15 days</p>';
 }
 
 let mediaListener = null;
 let mediaRef = null;
-let scanStatusRef = null;
-let scanStatusListener = null;
 function loadMedia() {
   if (!currentUid || !currentDeviceId) return;
   if (mediaRef && mediaListener) mediaRef.off('value', mediaListener);
-  if (scanStatusRef && scanStatusListener) scanStatusRef.off('value', scanStatusListener);
   mediaRef = database.ref(`users/${currentUid}/devices/${currentDeviceId}/media`);
-  scanStatusRef = database.ref(`users/${currentUid}/devices/${currentDeviceId}/mediaScan`);
-  scanStatusListener = scanStatusRef.on('value', snap => {
-    const status = snap.val();
-    if (!status) return;
-    if (status.status === 'scanning') showStatus('Sender is scanning media…');
-    if (status.status === 'complete') showStatus(`Scan complete: ${status.uploaded || 0} thumbnails uploaded, ${status.failed || 0} failed`);
-  });
   mediaListener = mediaRef.on('value', (snap) => {
     mediaItems = [];
-    snap.forEach(child => {
-      mediaItems.push({ id: child.key, ...child.val() });
-    });
-    mediaItems.sort((a, b) => (b.date || 0) - (a.date || 0));
+    snap.forEach(child => mediaItems.push({ id: child.key, ...child.val() }));
+    mediaItems.sort((a, b) => (b.date || b.uploadedAt || 0) - (a.date || a.uploadedAt || 0));
     renderMediaGrid();
   });
+}
+
+function mediaOriginalUrl(item) {
+  if (item.downloadURL) return Promise.resolve(item.downloadURL);
+  if (item.downloadUrl) return Promise.resolve(item.downloadUrl);
+  if (item.storagePath) return firebase.storage().ref(item.storagePath).getDownloadURL();
+  return Promise.reject(new Error('Original photo is not available in cloud storage yet.'));
 }
 
 function renderMediaGrid() {
   mediaGrid.innerHTML = '';
   const filtered = mediaItems.filter(m => m.type === currentMediaTab);
-
   if (filtered.length === 0) {
-    mediaGrid.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:40px;">No media yet. Tap scan to load.</p>';
+    mediaGrid.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:40px;">No backed-up photos yet. New photos appear here after Partypark uploads them.</p>';
     return;
   }
-
-  const isWifi = currentDeviceData?.networkType === 'wifi';
 
   filtered.forEach(item => {
     const div = document.createElement('div');
     div.className = 'media-item';
     div.style.cssText = 'position:relative;aspect-ratio:1;background:#1e293b;border-radius:8px;overflow:hidden;cursor:pointer;';
-
-    if (item.thumbnail) {
+    const previewUrl = item.downloadURL || item.downloadUrl || item.thumbnail || '';
+    if (previewUrl) {
       const image = document.createElement('img');
-      image.src = item.thumbnail;
-      image.alt = item.name || 'Media thumbnail';
+      image.src = previewUrl;
+      image.alt = item.name || 'Backed-up photo';
       image.loading = 'lazy';
       image.style.cssText = 'width:100%;height:100%;object-fit:cover;';
-      image.onerror = () => {
-        image.remove();
-        const fallback = document.createElement('div');
-        fallback.textContent = 'Preview unavailable';
-        fallback.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:12px;text-align:center;';
-        div.prepend(fallback);
-      };
       div.appendChild(image);
     } else {
       const fallback = document.createElement('div');
-      fallback.textContent = item.name || 'Thumbnail pending';
-      fallback.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:12px;text-align:center;';
+      fallback.textContent = item.name || 'Photo uploading…';
+      fallback.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:12px;text-align:center;padding:8px;';
       div.appendChild(fallback);
     }
-
     const sizeLabel = document.createElement('div');
     sizeLabel.style.cssText = 'position:absolute;bottom:4px;right:4px;background:rgba(0,0,0,0.7);color:white;font-size:10px;padding:2px 4px;border-radius:4px;';
     sizeLabel.textContent = formatSize(item.size);
     div.appendChild(sizeLabel);
-
-    if (item.type === 'video') {
-      const durLabel = document.createElement('div');
-      durLabel.style.cssText = 'position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.7);color:white;font-size:10px;padding:2px 4px;border-radius:4px;';
-      durLabel.textContent = formatDuration(item.duration);
-      div.appendChild(durLabel);
-    }
-
     div.addEventListener('click', () => showMediaOptions(item));
     mediaGrid.appendChild(div);
   });
 }
 
-function showMediaOptions(item) {
-  const isMobile = currentDeviceData?.networkType === 'mobile';
+async function showMediaOptions(item) {
   const size = formatSize(item.size);
-  let msg = `Download ${item.name}? (${size})`;
-  if (isMobile) {
-    msg = `The sender phone is using mobile data. Do you want to download this file? (${size})`;
-  }
-  if (confirm(msg)) {
-    showStatus('Download requested (full file transfer coming next)');
+  const isMobile = currentDeviceData?.networkType === 'mobile';
+  const message = isMobile
+    ? `The viewer is using a mobile network. Download ${item.name || 'this photo'} (${size})?`
+    : `Download ${item.name || 'this photo'} (${size})?`;
+  if (!confirm(message)) return;
+  try {
+    showStatus('Preparing cloud download…');
+    const url = await mediaOriginalUrl(item);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = item.name || 'watchnow-photo';
+    link.target = '_blank';
+    link.rel = 'noopener';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    showStatus('Cloud download started');
+  } catch (error) {
+    console.error('Photo download failed:', error);
+    showStatus(error.message || 'Could not download this photo');
   }
 }
 
