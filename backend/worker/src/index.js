@@ -9,9 +9,9 @@ function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
 }
 function fail(message, status = 400) { return json({ error: message }, status); }
-function cors(request, response) {
+function cors(request, response, env) {
   const origin = request.headers.get("Origin") || "";
-  const allowed = (request.env?.ALLOWED_ORIGINS || "").split(",").map(x => x.trim()).filter(Boolean);
+  const allowed = (env.ALLOWED_ORIGINS || "").split(",").map(x => x.trim()).filter(Boolean);
   const headers = new Headers(response.headers);
   if (allowed.includes(origin)) {
     headers.set("Access-Control-Allow-Origin", origin);
@@ -227,7 +227,7 @@ export default {
     let response;
     try { response = await handle(request, env); }
     catch (error) { console.error("Partypark backend error", error); response = fail("Internal backend error",500); }
-    return cors(request,response);
+    return cors(request,response,env);
   },
   async scheduled(controller, env, ctx) {
     ctx.waitUntil((async () => {
