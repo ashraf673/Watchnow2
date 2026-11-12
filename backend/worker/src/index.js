@@ -113,19 +113,20 @@ async function handle(request, env) {
     if (!input || !/^\d{8}$/.test(input.code || "") || typeof input.deviceId !== "string" || !/^[A-Za-z0-9_-]{8,100}$/.test(input.deviceId)) return fail("Valid 8-digit code and deviceId are required");
     const now = Date.now();
     const codeHash = await sha256(input.code);
-    const row = await env.DB.prepare("SELECT owner_uid,expires_at,consumed_at FROM activation_codes WHERE code_hash=?").bind(codeHash).first();
-    if (!row || row.consumed_at || row.expires_at < now) return fail("Activation code is invalid, expired, or already used", 401);
+    const now = Date.now();
+    const codeHash = await sha256(input.code);
+    const claimed = await env.DB.prepare(
+      "UPDATE activation_codes SET consumed_at=? WHERE code_hash=? AND consumed_at IS NULL AND expires_at>? RETURNING owner_uid"
+    ).bind(now, codeHash, now).first();
+    if (!claimed?.owner_uid) return fail("Activation code is invalid, expired, or already used", 401);
     const token = randomToken(32);
     const tokenHash = await sha256(token);
     const deviceName = String(input.deviceName || "Android device").slice(0, 80);
     try {
-      await env.DB.batch([
-        env.DB.prepare("UPDATE activation_codes SET consumed_at=? WHERE code_hash=? AND consumed_at IS NULL AND expires_at>?").bind(now, codeHash),
-        env.DB.prepare("INSERT INTO devices(device_id,owner_uid,device_name,token_hash,created_at,last_seen_at,token_expires_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET owner_uid=excluded.owner_uid,device_name=excluded.device_name,token_hash=excluded.token_hash,created_at=excluded.created_at,last_seen_at=excluded.last_seen_at,token_expires_at=excluded.token_expires_at,revoked_at=NULL").bind(input.deviceId,row.owner_uid,deviceName,tokenHash,now,now,now+DEVICE_TOKEN_TTL_MS)
-      ]);
+      await env.DB.prepare(
+        "INSERT INTO devices(device_id,owner_uid,device_name,token_hash,created_at,last_seen_at,token_expires_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET owner_uid=excluded.owner_uid,device_name=excluded.device_name,token_hash=excluded.token_hash,created_at=excluded.created_at,last_seen_at=excluded.last_seen_at,token_expires_at=excluded.token_expires_at,revoked_at=NULL"
+      ).bind(input.deviceId,claimed.owner_uid,deviceName,tokenHash,now,now,now+DEVICE_TOKEN_TTL_MS).run();
     } catch { return fail("Could not register device", 409); }
-    const check = await env.DB.prepare("SELECT consumed_at FROM activation_codes WHERE code_hash=?").bind(codeHash).first();
-    if (!check?.consumed_at) return fail("Activation code was already redeemed", 409);
     return json({ deviceId: input.deviceId, deviceToken: token, tokenExpiresAt: now + DEVICE_TOKEN_TTL_MS }, 201);
   }
 
