@@ -69,3 +69,20 @@ The D1 database ID in `wrangler.toml` is a placeholder and must be replaced with
 - Test one owner, one device, one photo, device revocation, expired code, and 15-day deletion before enabling real users.
 
 The Worker currently uses Firebase Identity Toolkit's `accounts:lookup` endpoint to validate owner ID tokens. It does not mint Firebase custom tokens; device API authorization is independently scoped through hashed bearer tokens in D1.
+
+
+## GitHub Actions deployment (avoids the Cloudflare GitHub redirect issue)
+
+A workflow is included at `.github/workflows/deploy-partypark-backend.yml`. It deploys on pushes to `feature/photo-backup-v1` that change the backend or workflow, and can also be started manually from GitHub Actions.
+
+Add these three repository Actions secrets in GitHub → Watchnow2 → Settings → Secrets and variables → Actions → New repository secret:
+
+- `CLOUDFLARE_API_TOKEN`: Cloudflare API token with permission to edit Workers scripts and D1 for this account.
+- `CLOUDFLARE_ACCOUNT_ID`: Cloudflare account ID.
+- `D1_DATABASE_ID`: the UUID shown on the `partypark-db` D1 database overview.
+
+The workflow substitutes the D1 ID into the Wrangler config at deploy time. Do not commit real credentials or IDs into the repository. The Worker runtime secrets listed above (Firebase API key and Google OAuth credentials) must still be added separately in Cloudflare Worker Settings → Variables and Secrets.
+
+After adding the three Actions secrets, open the GitHub Actions tab and run **Deploy Partypark backend**, or push a backend change to the feature branch. Confirm the run succeeds and then check `GET /health`.
+
+Do not deploy to the production/main branch. This workflow is intentionally limited to `feature/photo-backup-v1`.
