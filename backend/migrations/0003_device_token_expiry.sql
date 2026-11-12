@@ -1,0 +1,1 @@
+ALTER TABLE devices ADD COLUMN token_expires_at INTEGER NOT NULL DEFAULT 0;
