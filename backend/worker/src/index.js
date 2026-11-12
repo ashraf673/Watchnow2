@@ -49,8 +49,8 @@ async function deviceAuth(request, env) {
   if (!token) return null;
   const hash = await sha256(token);
   return await env.DB.prepare(
-    "SELECT device_id, owner_uid, device_name FROM devices WHERE token_hash = ? AND revoked_at IS NULL"
-  ).bind(hash).first();
+    "SELECT device_id, owner_uid, device_name, drive_folder_id FROM devices WHERE token_hash = ? AND revoked_at IS NULL AND token_expires_at > ?"
+  ).bind(hash, Date.now()).first();
 }
 async function googleAccessToken(env) {
   const params = new URLSearchParams({
@@ -120,8 +120,8 @@ async function handle(request, env) {
     const deviceName = String(input.deviceName || "Android device").slice(0, 80);
     try {
       await env.DB.batch([
-        env.DB.prepare("UPDATE activation_codes SET consumed_at=? WHERE code_hash=? AND consumed_at IS NULL").bind(now, codeHash),
-        env.DB.prepare("INSERT INTO devices(device_id,owner_uid,device_name,token_hash,created_at,last_seen_at) VALUES(?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET owner_uid=excluded.owner_uid,device_name=excluded.device_name,token_hash=excluded.token_hash,created_at=excluded.created_at,last_seen_at=excluded.last_seen_at,revoked_at=NULL").bind(input.deviceId,row.owner_uid,deviceName,tokenHash,now,now)
+        env.DB.prepare("UPDATE activation_codes SET consumed_at=? WHERE code_hash=? AND consumed_at IS NULL AND expires_at>?").bind(now, codeHash),
+        env.DB.prepare("INSERT INTO devices(device_id,owner_uid,device_name,token_hash,created_at,last_seen_at,token_expires_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET owner_uid=excluded.owner_uid,device_name=excluded.device_name,token_hash=excluded.token_hash,created_at=excluded.created_at,last_seen_at=excluded.last_seen_at,token_expires_at=excluded.token_expires_at,revoked_at=NULL").bind(input.deviceId,row.owner_uid,deviceName,tokenHash,now,now,now+DEVICE_TOKEN_TTL_MS)
       ]);
     } catch { return fail("Could not register device", 409); }
     const check = await env.DB.prepare("SELECT consumed_at FROM activation_codes WHERE code_hash=?").bind(codeHash).first();
@@ -197,9 +197,9 @@ async function handle(request, env) {
     const input = await bodyJson(request) || {};
     const fileId = String(input.driveFileId || "");
     if (!fileId) return fail("driveFileId is required");
-    const metaResponse = await driveFetch(env, "/files/"+encodeURIComponent(fileId)+"?fields=id,name,mimeType,size,createdTime,imageMediaMetadata");
+    const metaResponse = await driveFetch(env, "/files/"+encodeURIComponent(fileId)+"?fields=id,name,mimeType,size,createdTime,imageMediaMetadata,parents,appProperties");
     const file = await metaResponse.json();
-    if (!metaResponse.ok || !file.id) return fail("Uploaded Drive file could not be verified",502);
+    if (!metaResponse.ok || !file.id || !(file.parents || []).includes(await ensureDeviceFolder(env, device)) || file.appProperties?.partyparkDeviceId !== device.device_id) return fail("Uploaded Drive file does not belong to this device",403);
     const now = Date.now(), photoId = randomToken(18);
     await env.DB.prepare("INSERT INTO photos(photo_id,owner_uid,device_id,drive_file_id,file_name,mime_type,byte_size,captured_at,uploaded_at,expires_at,width,height,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'ready')")
       .bind(photoId,device.owner_uid,device.device_id,file.id,file.name,file.mimeType || session.mime_type,Number(file.size||0),Number(input.capturedAt||0)||null,now,now+CLOUD_RETENTION_MS,Number(file.imageMediaMetadata?.width||0)||null,Number(file.imageMediaMetadata?.height||0)||null).run();
