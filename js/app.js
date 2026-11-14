@@ -46,6 +46,26 @@ let offerListener = null;
 let senderCandidatesListener = null;
 let currentMediaTab = 'image';
 let mediaItems = [];
+let mediaObjectUrls = [];
+
+const PHOTO_BACKEND_URL = 'https://partypark-backend.a6h7a3.workers.dev';
+
+async function photoBackendRequest(path, options = {}) {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Please sign in with Google first.');
+  const idToken = await user.getIdToken();
+  const response = await fetch(PHOTO_BACKEND_URL + path, {
+    ...options,
+    headers: {
+      'Authorization': 'Bearer ' + idToken,
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {})
+    }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Photo backend request failed (' + response.status + ')');
+  return data;
+}
 
 function showStatus(msg) {
   const existing = document.getElementById('status-msg');
@@ -144,12 +164,17 @@ auth.onAuthStateChanged(async (user) => {
 });
 
 async function ensureActivationCode(uid) {
-  const codeRef = database.ref(`users/${uid}/activationCode`);
-  const snap = await codeRef.once('value');
-  if (!snap.exists()) {
-    const code = generateActivationCode();
-    await codeRef.set(code);
-    await database.ref(`activationCodes/${code}`).set({ uid: uid });
+  try {
+    const result = await photoBackendRequest('/v1/activation-codes', {
+      method: 'POST',
+      body: JSON.stringify({ deviceName: 'Watchnow owner' })
+    });
+    await database.ref(`users/${uid}/activationCode`).set(result.code);
+    activationCodeDisplay.textContent = result.code;
+    generateQR(result.code);
+  } catch (error) {
+    console.error('Cloud activation-code creation failed:', error);
+    showStatus('Could not create a device activation code: ' + error.message);
   }
 }
 
@@ -410,14 +435,6 @@ document.getElementById('open-files-btn').addEventListener('click', () => {
   showStatus('File Manager coming soon');
 });
 
-document.getElementById('scan-media-btn').addEventListener('click', async () => {
-  const button = document.getElementById('scan-media-btn');
-  button.disabled = true;
-  const sent = await sendCommand('scan_media');
-  if (sent) showStatus('Scan command sent. Waiting for sender...');
-  button.disabled = false;
-});
-
 document.getElementById('tab-photos').addEventListener('click', () => {
   currentMediaTab = 'image';
   renderMediaGrid();
@@ -435,99 +452,112 @@ function openPhotos() {
 }
 
 function updateLoadControls() {
-  // Scanning transfers only small thumbnails; it does not download original media.
-  mediaLoadControls.innerHTML = '<p style="color:#94a3b8;font-size:12px;">Thumbnails only · originals stay on the sender phone</p>';
+  mediaLoadControls.innerHTML =
+    '<p style="color:#94a3b8;font-size:12px;">Automatic cloud backup · Cloud copies are retained for 15 days</p>';
 }
 
-let mediaListener = null;
-let mediaRef = null;
-let scanStatusRef = null;
-let scanStatusListener = null;
-function loadMedia() {
+async function loadMedia() {
   if (!currentUid || !currentDeviceId) return;
-  if (mediaRef && mediaListener) mediaRef.off('value', mediaListener);
-  if (scanStatusRef && scanStatusListener) scanStatusRef.off('value', scanStatusListener);
-  mediaRef = database.ref(`users/${currentUid}/devices/${currentDeviceId}/media`);
-  scanStatusRef = database.ref(`users/${currentUid}/devices/${currentDeviceId}/mediaScan`);
-  scanStatusListener = scanStatusRef.on('value', snap => {
-    const status = snap.val();
-    if (!status) return;
-    if (status.status === 'scanning') showStatus('Sender is scanning media…');
-    if (status.status === 'complete') showStatus(`Scan complete: ${status.uploaded || 0} thumbnails uploaded, ${status.failed || 0} failed`);
-  });
-  mediaListener = mediaRef.on('value', (snap) => {
-    mediaItems = [];
-    snap.forEach(child => {
-      mediaItems.push({ id: child.key, ...child.val() });
-    });
-    mediaItems.sort((a, b) => (b.date || 0) - (a.date || 0));
+  try {
+    if (!auth.currentUser) {
+      mediaItems = [];
+      renderMediaGrid();
+      showStatus('Sign in with the owner Google account to view backed-up photos.');
+      return;
+    }
+    const result = await photoBackendRequest('/v1/devices/' + encodeURIComponent(currentDeviceId) + '/photos');
+    mediaItems = (result.photos || []).map(photo => ({
+      id: photo.photoId,
+      name: photo.fileName,
+      type: 'image',
+      size: photo.byteSize,
+      date: photo.capturedAt || photo.uploadedAt,
+      uploadedAt: photo.uploadedAt
+    }));
+    mediaItems.sort((a, b) => (b.date || b.uploadedAt || 0) - (a.date || a.uploadedAt || 0));
     renderMediaGrid();
+  } catch (error) {
+    console.error('Cloud photo list failed:', error);
+    mediaItems = [];
+    renderMediaGrid();
+    showStatus(error.message || 'Could not load backed-up photos');
+  }
+}
+
+async function mediaThumbnailUrl(item) {
+  if (!auth.currentUser) throw new Error('Owner Google sign-in is required.');
+  const idToken = await auth.currentUser.getIdToken();
+  const response = await fetch(PHOTO_BACKEND_URL + '/v1/photos/' + encodeURIComponent(item.id) + '/content', {
+    headers: { Authorization: 'Bearer ' + idToken }
   });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || 'Thumbnail download failed (' + response.status + ')');
+  }
+  const objectUrl = URL.createObjectURL(await response.blob());
+  mediaObjectUrls.push(objectUrl);
+  return objectUrl;
 }
 
 function renderMediaGrid() {
+  mediaObjectUrls.forEach(url => URL.revokeObjectURL(url));
+  mediaObjectUrls = [];
   mediaGrid.innerHTML = '';
   const filtered = mediaItems.filter(m => m.type === currentMediaTab);
-
   if (filtered.length === 0) {
-    mediaGrid.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:40px;">No media yet. Tap scan to load.</p>';
+    mediaGrid.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:40px;">No backed-up photos yet. New photos appear here after Partypark uploads them.</p>';
     return;
   }
-
-  const isWifi = currentDeviceData?.networkType === 'wifi';
 
   filtered.forEach(item => {
     const div = document.createElement('div');
     div.className = 'media-item';
     div.style.cssText = 'position:relative;aspect-ratio:1;background:#1e293b;border-radius:8px;overflow:hidden;cursor:pointer;';
-
-    if (item.thumbnail) {
-      const image = document.createElement('img');
-      image.src = item.thumbnail;
-      image.alt = item.name || 'Media thumbnail';
-      image.loading = 'lazy';
-      image.style.cssText = 'width:100%;height:100%;object-fit:cover;';
-      image.onerror = () => {
-        image.remove();
-        const fallback = document.createElement('div');
-        fallback.textContent = 'Preview unavailable';
-        fallback.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:12px;text-align:center;';
-        div.prepend(fallback);
-      };
-      div.appendChild(image);
-    } else {
-      const fallback = document.createElement('div');
-      fallback.textContent = item.name || 'Thumbnail pending';
-      fallback.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:12px;text-align:center;';
-      div.appendChild(fallback);
-    }
-
+    const fallback = document.createElement('div');
+    fallback.textContent = 'Loading thumbnail…';
+    fallback.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:12px;text-align:center;padding:8px;';
+    div.appendChild(fallback);
     const sizeLabel = document.createElement('div');
     sizeLabel.style.cssText = 'position:absolute;bottom:4px;right:4px;background:rgba(0,0,0,0.7);color:white;font-size:10px;padding:2px 4px;border-radius:4px;';
     sizeLabel.textContent = formatSize(item.size);
     div.appendChild(sizeLabel);
-
-    if (item.type === 'video') {
-      const durLabel = document.createElement('div');
-      durLabel.style.cssText = 'position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.7);color:white;font-size:10px;padding:2px 4px;border-radius:4px;';
-      durLabel.textContent = formatDuration(item.duration);
-      div.appendChild(durLabel);
-    }
-
     div.addEventListener('click', () => showMediaOptions(item));
     mediaGrid.appendChild(div);
+
+    // Fetch each thumbnail independently; the gallery stays responsive while they load.
+    mediaThumbnailUrl(item).then(url => {
+      if (!div.isConnected) { URL.revokeObjectURL(url); return; }
+      const image = document.createElement('img');
+      image.src = url;
+      image.alt = item.name || 'Backed-up photo thumbnail';
+      image.loading = 'lazy';
+      image.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+      fallback.replaceWith(image);
+    }).catch(error => {
+      console.error('Thumbnail preview failed:', error);
+      if (div.isConnected) fallback.textContent = 'Preview unavailable';
+    });
   });
 }
 
-function showMediaOptions(item) {
-  const isMobile = currentDeviceData?.networkType === 'mobile';
+async function showMediaOptions(item) {
   const size = formatSize(item.size);
-  let msg = `Download ${item.name}? (${size})`;
-  if (isMobile) {
-    msg = `The sender phone is using mobile data. Do you want to download this file? (${size})`;
-  }
-  if (confirm(msg)) {
-    showStatus('Download requested (full file transfer coming next)');
+  const message = `Download thumbnail ${item.name || 'this photo'} (${size})?`;
+  if (!confirm(message)) return;
+  try {
+    showStatus('Preparing thumbnail download…');
+    const url = await mediaThumbnailUrl(item);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = item.name || 'watchnow-thumbnail.jpg';
+    link.rel = 'noopener';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    showStatus('Thumbnail download started');
+  } catch (error) {
+    console.error('Thumbnail download failed:', error);
+    showStatus(error.message || 'Could not download this thumbnail');
   }
 }
 
