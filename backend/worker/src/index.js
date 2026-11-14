@@ -113,8 +113,6 @@ async function handle(request, env) {
     if (!input || !/^\d{8}$/.test(input.code || "") || typeof input.deviceId !== "string" || !/^[A-Za-z0-9_-]{8,100}$/.test(input.deviceId)) return fail("Valid 8-digit code and deviceId are required");
     const now = Date.now();
     const codeHash = await sha256(input.code);
-    const now = Date.now();
-    const codeHash = await sha256(input.code);
     const claimed = await env.DB.prepare(
       "UPDATE activation_codes SET consumed_at=? WHERE code_hash=? AND consumed_at IS NULL AND expires_at>? RETURNING owner_uid"
     ).bind(now, codeHash, now).first();
