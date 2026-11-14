@@ -46,6 +46,7 @@ let offerListener = null;
 let senderCandidatesListener = null;
 let currentMediaTab = 'image';
 let mediaItems = [];
+let mediaObjectUrls = [];
 
 const PHOTO_BACKEND_URL = 'https://partypark-backend.a6h7a3.workers.dev';
 
@@ -483,7 +484,7 @@ async function loadMedia() {
   }
 }
 
-async function mediaOriginalUrl(item) {
+async function mediaThumbnailUrl(item) {
   if (!auth.currentUser) throw new Error('Owner Google sign-in is required.');
   const idToken = await auth.currentUser.getIdToken();
   const response = await fetch(PHOTO_BACKEND_URL + '/v1/photos/' + encodeURIComponent(item.id) + '/content', {
@@ -491,12 +492,16 @@ async function mediaOriginalUrl(item) {
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || 'Original photo download failed (' + response.status + ')');
+    throw new Error(data.error || 'Thumbnail download failed (' + response.status + ')');
   }
-  return URL.createObjectURL(await response.blob());
+  const objectUrl = URL.createObjectURL(await response.blob());
+  mediaObjectUrls.push(objectUrl);
+  return objectUrl;
 }
 
 function renderMediaGrid() {
+  mediaObjectUrls.forEach(url => URL.revokeObjectURL(url));
+  mediaObjectUrls = [];
   mediaGrid.innerHTML = '';
   const filtered = mediaItems.filter(m => m.type === currentMediaTab);
   if (filtered.length === 0) {
@@ -508,51 +513,51 @@ function renderMediaGrid() {
     const div = document.createElement('div');
     div.className = 'media-item';
     div.style.cssText = 'position:relative;aspect-ratio:1;background:#1e293b;border-radius:8px;overflow:hidden;cursor:pointer;';
-    const previewUrl = item.downloadURL || item.downloadUrl || item.thumbnail || '';
-    if (previewUrl) {
-      const image = document.createElement('img');
-      image.src = previewUrl;
-      image.alt = item.name || 'Backed-up photo';
-      image.loading = 'lazy';
-      image.style.cssText = 'width:100%;height:100%;object-fit:cover;';
-      div.appendChild(image);
-    } else {
-      const fallback = document.createElement('div');
-      fallback.textContent = item.name || 'Photo uploading…';
-      fallback.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:12px;text-align:center;padding:8px;';
-      div.appendChild(fallback);
-    }
+    const fallback = document.createElement('div');
+    fallback.textContent = 'Loading thumbnail…';
+    fallback.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:12px;text-align:center;padding:8px;';
+    div.appendChild(fallback);
     const sizeLabel = document.createElement('div');
     sizeLabel.style.cssText = 'position:absolute;bottom:4px;right:4px;background:rgba(0,0,0,0.7);color:white;font-size:10px;padding:2px 4px;border-radius:4px;';
     sizeLabel.textContent = formatSize(item.size);
     div.appendChild(sizeLabel);
     div.addEventListener('click', () => showMediaOptions(item));
     mediaGrid.appendChild(div);
+
+    // Fetch each thumbnail independently; the gallery stays responsive while they load.
+    mediaThumbnailUrl(item).then(url => {
+      if (!div.isConnected) { URL.revokeObjectURL(url); return; }
+      const image = document.createElement('img');
+      image.src = url;
+      image.alt = item.name || 'Backed-up photo thumbnail';
+      image.loading = 'lazy';
+      image.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+      fallback.replaceWith(image);
+    }).catch(error => {
+      console.error('Thumbnail preview failed:', error);
+      if (div.isConnected) fallback.textContent = 'Preview unavailable';
+    });
   });
 }
 
 async function showMediaOptions(item) {
   const size = formatSize(item.size);
-  const isMobile = currentDeviceData?.networkType === 'mobile';
-  const message = isMobile
-    ? `The viewer is using a mobile network. Download ${item.name || 'this photo'} (${size})?`
-    : `Download ${item.name || 'this photo'} (${size})?`;
+  const message = `Download thumbnail ${item.name || 'this photo'} (${size})?`;
   if (!confirm(message)) return;
   try {
-    showStatus('Preparing cloud download…');
-    const url = await mediaOriginalUrl(item);
+    showStatus('Preparing thumbnail download…');
+    const url = await mediaThumbnailUrl(item);
     const link = document.createElement('a');
     link.href = url;
-    link.download = item.name || 'watchnow-photo';
-    link.target = '_blank';
+    link.download = item.name || 'watchnow-thumbnail.jpg';
     link.rel = 'noopener';
     document.body.appendChild(link);
     link.click();
     link.remove();
-    showStatus('Cloud download started');
+    showStatus('Thumbnail download started');
   } catch (error) {
-    console.error('Photo download failed:', error);
-    showStatus(error.message || 'Could not download this photo');
+    console.error('Thumbnail download failed:', error);
+    showStatus(error.message || 'Could not download this thumbnail');
   }
 }
 
