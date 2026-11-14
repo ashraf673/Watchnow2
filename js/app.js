@@ -47,6 +47,25 @@ let senderCandidatesListener = null;
 let currentMediaTab = 'image';
 let mediaItems = [];
 
+const PHOTO_BACKEND_URL = 'https://partypark-backend.a6h7a3.workers.dev';
+
+async function photoBackendRequest(path, options = {}) {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Please sign in with Google first.');
+  const idToken = await user.getIdToken();
+  const response = await fetch(PHOTO_BACKEND_URL + path, {
+    ...options,
+    headers: {
+      'Authorization': 'Bearer ' + idToken,
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {})
+    }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Photo backend request failed (' + response.status + ')');
+  return data;
+}
+
 function showStatus(msg) {
   const existing = document.getElementById('status-msg');
   if (existing) existing.remove();
@@ -144,12 +163,17 @@ auth.onAuthStateChanged(async (user) => {
 });
 
 async function ensureActivationCode(uid) {
-  const codeRef = database.ref(`users/${uid}/activationCode`);
-  const snap = await codeRef.once('value');
-  if (!snap.exists()) {
-    const code = generateActivationCode();
-    await codeRef.set(code);
-    await database.ref(`activationCodes/${code}`).set({ uid: uid });
+  try {
+    const result = await photoBackendRequest('/v1/activation-codes', {
+      method: 'POST',
+      body: JSON.stringify({ deviceName: 'Watchnow owner' })
+    });
+    await database.ref(`users/${uid}/activationCode`).set(result.code);
+    activationCodeDisplay.textContent = result.code;
+    generateQR(result.code);
+  } catch (error) {
+    console.error('Cloud activation-code creation failed:', error);
+    showStatus('Could not create a device activation code: ' + error.message);
   }
 }
 
