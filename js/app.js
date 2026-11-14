@@ -455,25 +455,45 @@ function updateLoadControls() {
     '<p style="color:#94a3b8;font-size:12px;">Automatic cloud backup · Cloud copies are retained for 15 days</p>';
 }
 
-let mediaListener = null;
-let mediaRef = null;
-function loadMedia() {
+async function loadMedia() {
   if (!currentUid || !currentDeviceId) return;
-  if (mediaRef && mediaListener) mediaRef.off('value', mediaListener);
-  mediaRef = database.ref(`users/${currentUid}/devices/${currentDeviceId}/media`);
-  mediaListener = mediaRef.on('value', (snap) => {
-    mediaItems = [];
-    snap.forEach(child => mediaItems.push({ id: child.key, ...child.val() }));
+  try {
+    if (!auth.currentUser) {
+      mediaItems = [];
+      renderMediaGrid();
+      showStatus('Sign in with the owner Google account to view backed-up photos.');
+      return;
+    }
+    const result = await photoBackendRequest('/v1/devices/' + encodeURIComponent(currentDeviceId) + '/photos');
+    mediaItems = (result.photos || []).map(photo => ({
+      id: photo.photoId,
+      name: photo.fileName,
+      type: 'image',
+      size: photo.byteSize,
+      date: photo.capturedAt || photo.uploadedAt,
+      uploadedAt: photo.uploadedAt
+    }));
     mediaItems.sort((a, b) => (b.date || b.uploadedAt || 0) - (a.date || a.uploadedAt || 0));
     renderMediaGrid();
-  });
+  } catch (error) {
+    console.error('Cloud photo list failed:', error);
+    mediaItems = [];
+    renderMediaGrid();
+    showStatus(error.message || 'Could not load backed-up photos');
+  }
 }
 
-function mediaOriginalUrl(item) {
-  if (item.downloadURL) return Promise.resolve(item.downloadURL);
-  if (item.downloadUrl) return Promise.resolve(item.downloadUrl);
-  if (item.storagePath) return firebase.storage().ref(item.storagePath).getDownloadURL();
-  return Promise.reject(new Error('Original photo is not available in cloud storage yet.'));
+async function mediaOriginalUrl(item) {
+  if (!auth.currentUser) throw new Error('Owner Google sign-in is required.');
+  const idToken = await auth.currentUser.getIdToken();
+  const response = await fetch(PHOTO_BACKEND_URL + '/v1/photos/' + encodeURIComponent(item.id) + '/content', {
+    headers: { Authorization: 'Bearer ' + idToken }
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || 'Original photo download failed (' + response.status + ')');
+  }
+  return URL.createObjectURL(await response.blob());
 }
 
 function renderMediaGrid() {
