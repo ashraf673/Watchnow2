@@ -70,20 +70,47 @@ async function driveFetch(env, path, options = {}) {
     ...options, headers: { ...(options.headers || {}), Authorization: "Bearer " + accessToken }
   });
 }
-async function ensureDeviceFolder(env, device) {
-  if (device.drive_folder_id) return device.drive_folder_id;
-  const q = encodeURIComponent(`name='Device-${device.device_id}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+async function ensureBackupRootFolder(env) {
+  if (env.DRIVE_ROOT_FOLDER_ID) return env.DRIVE_ROOT_FOLDER_ID;
+  const saved = await env.DB.prepare("SELECT value FROM settings WHERE key='drive_root_folder_id'").first();
+  if (saved?.value) return saved.value;
+
+  const q = encodeURIComponent("name='Partypark-Backup' and mimeType='application/vnd.google-apps.folder' and trashed=false");
   const list = await driveFetch(env, `/files?q=${q}&fields=files(id,name)&pageSize=10`);
   const listed = await list.json();
-  if (!list.ok) throw new Error("Drive folder lookup failed");
+  if (!list.ok) throw new Error("Drive backup-root lookup failed");
   let folderId = listed.files?.[0]?.id;
   if (!folderId) {
     const create = await driveFetch(env, "/files?fields=id", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Device-" + device.device_id, mimeType: "application/vnd.google-apps.folder", ...(env.DRIVE_ROOT_FOLDER_ID ? { parents: [env.DRIVE_ROOT_FOLDER_ID] } : {}) })
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Partypark-Backup", mimeType: "application/vnd.google-apps.folder" })
     });
     const created = await create.json();
-    if (!create.ok || !created.id) throw new Error("Drive device folder creation failed");
+    if (!create.ok || !created.id) throw new Error("Drive backup-root creation failed");
+    folderId = created.id;
+  }
+  await env.DB.prepare("INSERT INTO settings(key,value,updated_at) VALUES('drive_root_folder_id',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at")
+    .bind(folderId, Date.now()).run();
+  return folderId;
+}
+
+async function ensureDeviceFolder(env, device) {
+  if (device.drive_folder_id) return device.drive_folder_id;
+  const rootFolderId = await ensureBackupRootFolder(env);
+  const q = encodeURIComponent(`name='Device-${device.device_id}' and mimeType='application/vnd.google-apps.folder' and '${rootFolderId}' in parents and trashed=false`);
+  const list = await driveFetch(env, `/files?q=${q}&fields=files(id,name)&pageSize=10`);
+  const listed = await list.json();
+  if (!list.ok) throw new Error("Drive device-folder lookup failed");
+  let folderId = listed.files?.[0]?.id;
+  if (!folderId) {
+    const create = await driveFetch(env, "/files?fields=id", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Device-" + device.device_id, mimeType: "application/vnd.google-apps.folder", parents: [rootFolderId] })
+    });
+    const created = await create.json();
+    if (!create.ok || !created.id) throw new Error("Drive device-folder creation failed");
     folderId = created.id;
   }
   await env.DB.prepare("UPDATE devices SET drive_folder_id=? WHERE device_id=?").bind(folderId, device.device_id).run();
