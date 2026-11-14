@@ -152,7 +152,7 @@ async function handle(request, env) {
         "INSERT INTO devices(device_id,owner_uid,device_name,token_hash,created_at,last_seen_at,token_expires_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET owner_uid=excluded.owner_uid,device_name=excluded.device_name,token_hash=excluded.token_hash,created_at=excluded.created_at,last_seen_at=excluded.last_seen_at,token_expires_at=excluded.token_expires_at,revoked_at=NULL"
       ).bind(input.deviceId,claimed.owner_uid,deviceName,tokenHash,now,now,now+DEVICE_TOKEN_TTL_MS).run();
     } catch { return fail("Could not register device", 409); }
-    return json({ deviceId: input.deviceId, deviceToken: token, tokenExpiresAt: now + DEVICE_TOKEN_TTL_MS }, 201);
+    return json({ deviceId: input.deviceId, deviceToken: token, ownerUid: claimed.owner_uid, tokenExpiresAt: now + DEVICE_TOKEN_TTL_MS }, 201);
   }
 
   if (path === "/v1/devices" && request.method === "GET") {
