@@ -49,7 +49,7 @@ The D1 database ID in `wrangler.toml` is a placeholder and must be replaced with
 
 - `GET /health`
 - `POST /v1/activation-codes` (Firebase owner ID token)
-- `POST /v1/devices/redeem` (one-time 8-digit code)
+- `POST /v1/devices/redeem` (one-time WN- plus 12 uppercase alphanumeric characters)
 - `GET /v1/devices` (Firebase owner ID token)
 - `DELETE /v1/devices/:deviceId` (Firebase owner ID token)
 - `POST /v1/photos/upload-sessions` (device bearer token)
@@ -68,7 +68,7 @@ The D1 database ID in `wrangler.toml` is a placeholder and must be replaced with
 - Tighten Firebase RTDB rules only after all app components authenticate correctly. Current public rules are unsafe and must not be treated as production security.
 - Test one owner, one device, one photo, device revocation, expired code, and 15-day deletion before enabling real users.
 
-The Worker currently uses Firebase Identity Toolkit's `accounts:lookup` endpoint to validate owner ID tokens. It does not mint Firebase custom tokens; device API authorization is independently scoped through hashed bearer tokens in D1.
+Activation codes use the legacy-compatible `WN-XXXXXXXXXXXX` format (12 uppercase letters/digits after `WN-`), are stored only as SHA-256 hashes, expire after 10 minutes, and are consumed once during redemption. The Worker currently uses Firebase Identity Toolkit's `accounts:lookup` endpoint to validate owner ID tokens. It does not mint Firebase custom tokens; device API authorization is independently scoped through hashed bearer tokens in D1.
 
 
 ## GitHub Actions deployment (avoids the Cloudflare GitHub redirect issue)
