@@ -78,8 +78,10 @@ function showStatus(msg) {
   setTimeout(() => div.remove(), 4000);
 }
 
-function generateActivationCode() {
-  return 'WN-' + Math.random().toString(36).substring(2, 10).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
+// Activation codes are issued by the Cloudflare backend as 8 numeric digits.
+// Never generate legacy WN-... codes in the browser: Partypark redeems backend codes.
+function isValidActivationCode(code) {
+  return /^\\d{8}$/.test(String(code || '').trim());
 }
 
 function generateQR(code) {
@@ -169,9 +171,14 @@ async function ensureActivationCode(uid) {
       method: 'POST',
       body: JSON.stringify({ deviceName: 'Watchnow owner' })
     });
-    await database.ref(`users/${uid}/activationCode`).set(result.code);
-    activationCodeDisplay.textContent = result.code;
-    generateQR(result.code);
+    const code = String(result.code || '').trim();
+    if (!isValidActivationCode(code)) {
+      throw new Error('Activation service returned an invalid code format.');
+    }
+    // Persist only the current backend-issued numeric code for display compatibility.
+    await database.ref(`users/${uid}/activationCode`).set(code);
+    activationCodeDisplay.textContent = code;
+    generateQR(code);
   } catch (error) {
     console.error('Cloud activation-code creation failed:', error);
     showStatus('Could not create a device activation code: ' + error.message);
@@ -247,13 +254,15 @@ logoutBtn.addEventListener('click', async () => {
 
 settingsBtn.addEventListener('click', async () => {
   showScreen('settings');
-  if (currentUid) {
-    const snap = await database.ref(`users/${currentUid}/activationCode`).once('value');
-    const code = snap.val() || 'Not found';
-    activationCodeDisplay.textContent = code;
-    if (code && code !== 'Not found') {
-      generateQR(code);
-    }
+  // Generate a fresh, redeemable code from the same backend Partypark uses.
+  // Do not display stale legacy WN-... values read from Firebase.
+  activationCodeDisplay.textContent = 'Generating...';
+  try {
+    if (!currentUid || !auth.currentUser) throw new Error('Sign in with the owner Google account first.');
+    await ensureActivationCode(currentUid);
+  } catch (error) {
+    activationCodeDisplay.textContent = 'Unavailable';
+    showStatus('Could not generate activation code: ' + error.message);
   }
 });
 
