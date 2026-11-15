@@ -188,7 +188,7 @@ async function ensureActivationCode(uid) {
 
   // Keep the photo-backup backend in sync separately; a temporary backend/network
   // failure must never prevent Firebase activation or hide the owner's code.
-  photoBackendRequest('/v1/activation-codes', {
+  await photoBackendRequest('/v1/activation-codes', {
     method: 'POST',
     body: JSON.stringify({ code, deviceName: 'Watchnow owner' })
   }).catch(error => console.warn('Photo-backup backend code sync unavailable:', error));
