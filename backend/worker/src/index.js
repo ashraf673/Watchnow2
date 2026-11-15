@@ -41,15 +41,27 @@ async function bodyJson(request) {
   try { return await request.json(); } catch { return null; }
 }
 async function ownerUid(request, env) {
-  const token = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
-  if (!token || !env.FIREBASE_WEB_API_KEY) return null;
-  const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(env.FIREBASE_WEB_API_KEY)}`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idToken: token })
-  });
-  if (!response.ok) return null;
-  const result = await response.json();
-  const user = result.users?.[0];
-  return user?.localId || null;
+  const token = (request.headers.get("Authorization") || "").replace(/^Bearer\\s+/i, "");
+  if (!token) return null;
+
+  // Google/Firebase owner sessions remain supported.
+  if (env.FIREBASE_WEB_API_KEY) {
+    const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(env.FIREBASE_WEB_API_KEY)}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idToken: token })
+    });
+    if (response.ok) {
+      const result = await response.json();
+      const user = result.users?.[0];
+      if (user?.localId) return user.localId;
+    }
+  }
+
+  // Activation-code login receives a separate, expiring owner session token.
+  const tokenHash = await sha256(token);
+  const session = await env.DB.prepare(
+    "SELECT owner_uid FROM owner_sessions WHERE token_hash=? AND expires_at>? AND revoked_at IS NULL"
+  ).bind(tokenHash, Date.now()).first();
+  return session?.owner_uid || null;
 }
 async function deviceAuth(request, env) {
   const token = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
@@ -129,6 +141,22 @@ async function handle(request, env) {
   if (request.method === "OPTIONS") return new Response(null, { status: 204 });
   if (path === "/health" && request.method === "GET") return json({ ok: true, service: "partypark-backend", version: 1 });
   if (!env.DB) return fail("D1 binding DB is missing", 503);
+
+  if (path === "/v1/owner/sessions" && request.method === "POST") {
+    const input = await bodyJson(request);
+    const code = String(input?.code || "").trim().toUpperCase();
+    if (!ACTIVATION_CODE_PATTERN.test(code)) return fail("A valid permanent activation code is required");
+    const owner = await env.DB.prepare(
+      "SELECT owner_uid FROM owner_access_codes WHERE code_hash=?"
+    ).bind(await sha256(code)).first();
+    if (!owner?.owner_uid) return fail("Activation code is invalid", 401);
+    const token = randomToken(32);
+    const now = Date.now();
+    await env.DB.prepare(
+      "INSERT INTO owner_sessions(token_hash,owner_uid,created_at,expires_at) VALUES(?,?,?,?)"
+    ).bind(await sha256(token), owner.owner_uid, now, now + 30 * 24 * 60 * 60 * 1000).run();
+    return json({ ownerUid: owner.owner_uid, ownerToken: token, expiresAt: now + 30 * 24 * 60 * 60 * 1000 }, 201);
+  }
 
   if (path === "/v1/activation-codes" && request.method === "POST") {
     const uid = await ownerUid(request, env);
