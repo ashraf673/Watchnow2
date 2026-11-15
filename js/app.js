@@ -265,8 +265,40 @@ logoutBtn.addEventListener('click', async () => {
 // Settings
 // =====================================================
 
-settingsBtn.addEventListener('click', async () => {
+const accountOptionBtn = document.getElementById('account-option-btn');
+const activationOptionBtn = document.getElementById('activation-option-btn');
+const accountBackBtn = document.getElementById('account-back-btn');
+const activationBackBtn = document.getElementById('activation-back-btn');
+
+settingsBtn.addEventListener('click', () => {
   showScreen('settings');
+});
+
+accountOptionBtn.addEventListener('click', async () => {
+  showScreen('account');
+  const nameEl = document.getElementById('account-name');
+  const emailEl = document.getElementById('account-email');
+  const countEl = document.getElementById('account-device-count');
+  const user = auth.currentUser;
+  nameEl.textContent = user?.displayName || 'Not available';
+  emailEl.textContent = user?.email || 'Not available';
+  countEl.textContent = 'Loading...';
+  if (!currentUid) {
+    countEl.textContent = '0';
+    return;
+  }
+  try {
+    const snapshot = await database.ref(`users/${currentUid}/devices`).once('value');
+    const devices = snapshot.val() || {};
+    countEl.textContent = String(Object.keys(devices).length);
+  } catch (error) {
+    console.error('Could not load account device count:', error);
+    countEl.textContent = 'Unavailable';
+  }
+});
+
+activationOptionBtn.addEventListener('click', async () => {
+  showScreen('activation-code');
   activationCodeDisplay.textContent = 'Loading...';
   try {
     if (!currentUid || !auth.currentUser) throw new Error('Sign in with the owner Google account first.');
@@ -277,13 +309,13 @@ settingsBtn.addEventListener('click', async () => {
   }
 });
 
-settingsBackBtn.addEventListener('click', () => {
-  showScreen('devices');
-});
+accountBackBtn.addEventListener('click', () => showScreen('settings'));
+activationBackBtn.addEventListener('click', () => showScreen('settings'));
+settingsBackBtn.addEventListener('click', () => showScreen('devices'));
 
 copyCodeBtn.addEventListener('click', () => {
   const code = activationCodeDisplay.textContent;
-  if (code && code !== 'Loading...' && code !== 'Not found') {
+  if (code && code !== 'Loading...' && code !== 'Not found' && code !== 'Unavailable') {
     navigator.clipboard.writeText(code).then(() => {
       showStatus('Activation code copied');
     }).catch(() => {
@@ -302,6 +334,8 @@ function showScreen(name) {
   deviceDetailsScreen.classList.add('hidden');
   photosScreen.classList.add('hidden');
   settingsScreen.classList.add('hidden');
+  document.getElementById('account-screen').classList.add('hidden');
+  document.getElementById('activation-code-screen').classList.add('hidden');
   viewerScreen.classList.add('hidden');
 
   if (name === 'login') loginScreen.classList.remove('hidden');
@@ -309,6 +343,8 @@ function showScreen(name) {
   if (name === 'details') deviceDetailsScreen.classList.remove('hidden');
   if (name === 'photos') photosScreen.classList.remove('hidden');
   if (name === 'settings') settingsScreen.classList.remove('hidden');
+  if (name === 'account') document.getElementById('account-screen').classList.remove('hidden');
+  if (name === 'activation-code') document.getElementById('activation-code-screen').classList.remove('hidden');
   if (name === 'viewer') viewerScreen.classList.remove('hidden');
 }
 
