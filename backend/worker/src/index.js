@@ -41,7 +41,7 @@ async function bodyJson(request) {
   try { return await request.json(); } catch { return null; }
 }
 async function ownerUid(request, env) {
-  const token = (request.headers.get("Authorization") || "").replace(/^Bearer\\s+/i, "");
+  const token = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
   if (!token) return null;
 
   // Google/Firebase owner sessions remain supported.
