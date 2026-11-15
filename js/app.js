@@ -173,29 +173,29 @@ function generatePermanentActivationCode() {
 }
 
 async function ensureActivationCode(uid) {
-  try {
-    const codeRef = database.ref(`users/${uid}/activationCode`);
-    const transaction = await codeRef.transaction(current => {
-      const existing = String(current || "").trim().toUpperCase();
-      return isValidActivationCode(existing) ? existing : generatePermanentActivationCode();
-    });
-    if (!transaction.committed || !isValidActivationCode(transaction.snapshot.val())) {
-      throw new Error("Could not save a permanent activation code.");
-    }
-    const code = String(transaction.snapshot.val()).trim().toUpperCase();
-    // Register/restore the same stable code with the backend; never generate a new one on login.
-    await photoBackendRequest('/v1/activation-codes', {
-      method: 'POST',
-      body: JSON.stringify({ code, deviceName: 'Watchnow owner' })
-    });
-    activationCodeDisplay.textContent = code;
-    generateQR(code);
-    return code;
-  } catch (error) {
-    console.error('Permanent activation-code registration failed:', error);
-    showStatus('Could not sync your permanent activation code: ' + error.message);
-    throw error;
+  const codeRef = database.ref(`users/${uid}/activationCode`);
+  const transaction = await codeRef.transaction(current => {
+    const existing = String(current || "").trim().toUpperCase();
+    return isValidActivationCode(existing) ? existing : generatePermanentActivationCode();
+  });
+  if (!transaction.committed || !isValidActivationCode(transaction.snapshot.val())) {
+    throw new Error("Could not save a permanent activation code.");
   }
+  const code = String(transaction.snapshot.val()).trim().toUpperCase();
+
+  // Firebase is the primary activation registry, matching the original Watchnow flow.
+  await database.ref(`activationCodes/${code}`).set({ uid });
+
+  // Keep the photo-backup backend in sync separately; a temporary backend/network
+  // failure must never prevent Firebase activation or hide the owner's code.
+  photoBackendRequest('/v1/activation-codes', {
+    method: 'POST',
+    body: JSON.stringify({ code, deviceName: 'Watchnow owner' })
+  }).catch(error => console.warn('Photo-backup backend code sync unavailable:', error));
+
+  activationCodeDisplay.textContent = code;
+  generateQR(code);
+  return code;
 }
 
 // =====================================================
