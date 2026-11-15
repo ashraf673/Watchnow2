@@ -10,10 +10,6 @@ const photosScreen = document.getElementById('photos-screen');
 const settingsScreen = document.getElementById('settings-screen');
 const viewerScreen = document.getElementById('viewer-screen');
 const googleLoginBtn = document.getElementById('google-login-btn');
-const activationLoginBtn = document.getElementById('activation-login-btn');
-const activationInputBox = document.getElementById('activation-input-box');
-const activationCodeInput = document.getElementById('activation-code-input');
-const activationSubmitBtn = document.getElementById('activation-submit-btn');
 const logoutBtn = document.getElementById('logout-btn');
 const settingsBtn = document.getElementById('settings-btn');
 const settingsBackBtn = document.getElementById('settings-back-btn');
@@ -51,10 +47,9 @@ let mediaObjectUrls = [];
 const PHOTO_BACKEND_URL = 'https://partypark-backend.a6h7a3.workers.dev';
 
 async function getOwnerAccessToken() {
-  if (auth.currentUser) return await auth.currentUser.getIdToken();
-  const token = localStorage.getItem('watchnow_owner_token');
-  if (token) return token;
-  throw new Error('Owner authentication required. Sign in with Google or enter the permanent activation code.');
+  const user = auth.currentUser;
+  if (!user) throw new Error('Google sign-in required. Please sign in with your owner Google account.');
+  return await user.getIdToken(true);
 }
 
 async function photoBackendRequest(path, options = {}) {
@@ -209,65 +204,8 @@ async function ensureActivationCode(uid) {
 }
 
 // =====================================================
-// Activation Code Login
+// Google-only session restore
 // =====================================================
-
-activationLoginBtn.addEventListener('click', () => {
-  activationInputBox.classList.remove('hidden');
-  activationLoginBtn.classList.add('hidden');
-});
-
-activationSubmitBtn.addEventListener('click', async () => {
-  const code = activationCodeInput.value.trim().toUpperCase();
-  if (!code) {
-    showStatus('Please enter activation code');
-    return;
-  }
-
-  activationSubmitBtn.disabled = true;
-  activationSubmitBtn.textContent = 'Checking...';
-
-  try {
-    const snap = await database.ref(`activationCodes/${code}`).once('value');
-    if (snap.exists()) {
-      const data = snap.val();
-      currentUid = data.uid;
-      currentUser = { uid: currentUid };
-      // Exchange the permanent Firebase activation code for a limited 30-day
-      // photo-viewer session. The permanent code itself is never stored as a session token.
-      const sessionResponse = await fetch(PHOTO_BACKEND_URL + '/v1/owner/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code })
-      });
-      const sessionData = await sessionResponse.json().catch(() => ({}));
-      if (!sessionResponse.ok || !sessionData.ownerToken) {
-        throw new Error(sessionData.error || 'Could not create photo-viewer session');
-      }
-      if (sessionData.ownerUid !== currentUid) throw new Error('Activation code owner mismatch');
-      localStorage.setItem('watchnow_owner_token', sessionData.ownerToken);
-      localStorage.setItem('watchnow_uid', currentUid);
-      showStatus('Login successful');
-      showScreen('devices');
-      loadDevices();
-    } else {
-      showStatus('Invalid activation code');
-    }
-  } catch (err) {
-    showStatus('Error: ' + err.message);
-  }
-
-  activationSubmitBtn.disabled = false;
-  activationSubmitBtn.textContent = 'Continue';
-});
-
-const savedUid = localStorage.getItem('watchnow_uid');
-if (savedUid) {
-  currentUid = savedUid;
-  currentUser = { uid: savedUid };
-  showScreen('devices');
-  loadDevices();
-}
 
 // =====================================================
 // Logout
@@ -275,13 +213,10 @@ if (savedUid) {
 
 logoutBtn.addEventListener('click', async () => {
   localStorage.removeItem('watchnow_uid');
-  localStorage.removeItem('watchnow_owner_token');
   currentUid = null;
   currentUser = null;
   await auth.signOut();
   showScreen('login');
-  activationInputBox.classList.add('hidden');
-  activationLoginBtn.classList.remove('hidden');
   showStatus('Logged out');
 });
 
