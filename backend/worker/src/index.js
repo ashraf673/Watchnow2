@@ -12,7 +12,8 @@ function json(data, status = 200) {
 function fail(message, status = 400) { return json({ error: message }, status); }
 function cors(request, response, env) {
   const origin = request.headers.get("Origin") || "";
-  const allowed = (env.ALLOWED_ORIGINS || "").split(",").map(x => x.trim()).filter(Boolean);
+  const configured = (env.ALLOWED_ORIGINS || "").split(",").map(x => x.trim()).filter(Boolean);
+  const allowed = [...new Set(["https://ashraf673.github.io", ...configured])];
   const headers = new Headers(response.headers);
   if (allowed.includes(origin)) {
     headers.set("Access-Control-Allow-Origin", origin);
