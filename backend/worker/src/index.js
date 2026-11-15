@@ -133,24 +133,25 @@ async function handle(request, env) {
     const uid = await ownerUid(request, env);
     if (!uid) return fail("Owner authentication required", 401);
     const input = await bodyJson(request);
-    if (!input || typeof input.deviceName !== "string" || input.deviceName.length > 80) return fail("deviceName is required (max 80 characters)");
-    const code = randomActivationCode();
+    const code = String(input?.code || "").trim().toUpperCase();
+    if (!ACTIVATION_CODE_PATTERN.test(code)) return fail("A valid permanent WN- activation code is required");
     const now = Date.now();
     await env.DB.prepare("INSERT OR IGNORE INTO owners(uid,created_at) VALUES(?,?)").bind(uid, now).run();
-    await env.DB.prepare("INSERT INTO activation_codes(code_hash,owner_uid,expires_at,created_at) VALUES(?,?,?,?)").bind(await sha256(code), uid, now + CODE_TTL_MS, now).run();
-    return json({ code, expiresAt: now + CODE_TTL_MS, expiresInSeconds: 600 }, 201);
+    await env.DB.prepare(
+      "INSERT INTO owner_access_codes(owner_uid,code_hash,created_at,updated_at) VALUES(?,?,?,?) ON CONFLICT(owner_uid) DO UPDATE SET code_hash=excluded.code_hash,updated_at=excluded.updated_at"
+    ).bind(uid, await sha256(code), now, now).run();
+    return json({ ok: true, permanent: true });
   }
 
   if (path === "/v1/devices/redeem" && request.method === "POST") {
     const input = await bodyJson(request);
     const code = String(input?.code || "").trim().toUpperCase();
     if (!input || !ACTIVATION_CODE_PATTERN.test(code) || typeof input.deviceId !== "string" || !/^[A-Za-z0-9_-]{8,100}$/.test(input.deviceId)) return fail("Valid WN- activation code and deviceId are required");
-    const now = Date.now();
-    const codeHash = await sha256(code);
     const claimed = await env.DB.prepare(
-      "UPDATE activation_codes SET consumed_at=? WHERE code_hash=? AND consumed_at IS NULL AND expires_at>? RETURNING owner_uid"
-    ).bind(now, codeHash, now).first();
-    if (!claimed?.owner_uid) return fail("Activation code is invalid, expired, or already used", 401);
+      "SELECT owner_uid FROM owner_access_codes WHERE code_hash=?"
+    ).bind(await sha256(code)).first();
+    if (!claimed?.owner_uid) return fail("Activation code is invalid", 401);
+    const now = Date.now();
     const token = randomToken(32);
     const tokenHash = await sha256(token);
     const deviceName = String(input.deviceName || "Android device").slice(0, 80);
