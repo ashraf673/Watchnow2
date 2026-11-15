@@ -165,23 +165,36 @@ auth.onAuthStateChanged(async (user) => {
   }
 });
 
+function generatePermanentActivationCode() {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  return "WN-" + [...bytes].map(value => alphabet[value % alphabet.length]).join("");
+}
+
 async function ensureActivationCode(uid) {
   try {
-    const result = await photoBackendRequest('/v1/activation-codes', {
-      method: 'POST',
-      body: JSON.stringify({ deviceName: 'Watchnow owner' })
+    const codeRef = database.ref(`users/${uid}/activationCode`);
+    const transaction = await codeRef.transaction(current => {
+      const existing = String(current || "").trim().toUpperCase();
+      return isValidActivationCode(existing) ? existing : generatePermanentActivationCode();
     });
-    const code = String(result.code || '').trim();
-    if (!isValidActivationCode(code)) {
-      throw new Error('Activation service returned an invalid code format.');
+    if (!transaction.committed || !isValidActivationCode(transaction.snapshot.val())) {
+      throw new Error("Could not save a permanent activation code.");
     }
-    // Persist only the current backend-issued numeric code for display compatibility.
-    await database.ref(`users/${uid}/activationCode`).set(code);
+    const code = String(transaction.snapshot.val()).trim().toUpperCase();
+    // Register/restore the same stable code with the backend; never generate a new one on login.
+    await photoBackendRequest('/v1/activation-codes', {
+      method: 'POST',
+      body: JSON.stringify({ code, deviceName: 'Watchnow owner' })
+    });
     activationCodeDisplay.textContent = code;
     generateQR(code);
+    return code;
   } catch (error) {
-    console.error('Cloud activation-code creation failed:', error);
-    showStatus('Could not create a device activation code: ' + error.message);
+    console.error('Permanent activation-code registration failed:', error);
+    showStatus('Could not sync your permanent activation code: ' + error.message);
+    throw error;
   }
 }
 
@@ -254,15 +267,13 @@ logoutBtn.addEventListener('click', async () => {
 
 settingsBtn.addEventListener('click', async () => {
   showScreen('settings');
-  // Generate a fresh, redeemable code from the same backend Partypark uses.
-  // Do not display stale legacy WN-... values read from Firebase.
-  activationCodeDisplay.textContent = 'Generating...';
+  activationCodeDisplay.textContent = 'Loading...';
   try {
     if (!currentUid || !auth.currentUser) throw new Error('Sign in with the owner Google account first.');
     await ensureActivationCode(currentUid);
   } catch (error) {
     activationCodeDisplay.textContent = 'Unavailable';
-    showStatus('Could not generate activation code: ' + error.message);
+    showStatus('Could not load permanent activation code: ' + error.message);
   }
 });
 
