@@ -4,6 +4,7 @@ const DEVICE_TOKEN_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 const UPLOAD_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const CLOUD_RETENTION_MS = 15 * 24 * 60 * 60 * 1000;
 const MAX_CHUNK_BYTES = 8 * 1024 * 1024;
+const ACTIVATION_CODE_PATTERN = /^WN-[A-Z0-9]{12}$/;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
@@ -25,6 +26,11 @@ function cors(request, response, env) {
 async function sha256(value) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function randomActivationCode() {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return "WN-" + [...bytes].map(value => alphabet[value % alphabet.length]).join("");
 }
 function randomToken(bytes = 32) {
   const data = crypto.getRandomValues(new Uint8Array(bytes));
@@ -128,7 +134,7 @@ async function handle(request, env) {
     if (!uid) return fail("Owner authentication required", 401);
     const input = await bodyJson(request);
     if (!input || typeof input.deviceName !== "string" || input.deviceName.length > 80) return fail("deviceName is required (max 80 characters)");
-    const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 100000000).padStart(8, "0");
+    const code = randomActivationCode();
     const now = Date.now();
     await env.DB.prepare("INSERT OR IGNORE INTO owners(uid,created_at) VALUES(?,?)").bind(uid, now).run();
     await env.DB.prepare("INSERT INTO activation_codes(code_hash,owner_uid,expires_at,created_at) VALUES(?,?,?,?)").bind(await sha256(code), uid, now + CODE_TTL_MS, now).run();
