@@ -386,3 +386,30 @@ body {
 .control-btn.danger {
   background: var(--danger);
 }
+
+/* Settings navigation and account details */
+.settings-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 16px;
+  margin-bottom: 12px;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.settings-option:active { background: #243044; }
+.settings-option-icon { font-size: 24px; width: 32px; text-align: center; }
+.settings-option-copy { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.settings-option-copy strong { font-size: 16px; font-weight: 600; }
+.settings-option-copy small { color: var(--text-muted); font-size: 13px; }
+.settings-option-arrow { font-size: 28px; color: var(--text-muted); }
+.account-info-card { padding: 20px; }
+.account-avatar { width: 64px; height: 64px; border-radius: 50%; display:flex; align-items:center; justify-content:center; background:var(--bg); font-size:30px; margin: 0 auto 20px; }
+.account-info-row { display:flex; flex-direction:column; gap:5px; padding:14px 0; border-top:1px solid var(--border); }
+.account-info-row span { color:var(--text-muted); font-size:13px; }
+.account-info-row strong { font-size:16px; font-weight:600; overflow-wrap:anywhere; }
