@@ -81,7 +81,7 @@ function showStatus(msg) {
 // Activation codes are issued by the Cloudflare backend as 8 numeric digits.
 // Never generate legacy WN-... codes in the browser: Partypark redeems backend codes.
 function isValidActivationCode(code) {
-  return /^\d{8}$/.test(String(code || '').trim());
+  return /^WN-[A-Z0-9]{12}$/.test(String(code || '').trim().toUpperCase());
 }
 
 function generateQR(code) {
