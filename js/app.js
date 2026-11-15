@@ -578,7 +578,7 @@ function renderMediaGrid() {
   mediaGrid.innerHTML = '';
   const filtered = mediaItems.filter(m => m.type === currentMediaTab);
   if (filtered.length === 0) {
-    mediaGrid.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:40px;">No backed-up photos yet. New photos appear here after Partypark uploads them.</p>';
+    mediaGrid.innerHTML = '<p style="grid-column:1 / -1;width:100%;box-sizing:border-box;text-align:center;color:#94a3b8;padding:40px 16px;">No backed-up photos yet. New photos appear here after Partypark uploads them.</p>';
     return;
   }
 
