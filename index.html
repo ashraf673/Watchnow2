@@ -97,17 +97,57 @@
         <div></div>
       </header>
       <div class="content">
+        <button id="account-option-btn" class="settings-option">
+          <span class="settings-option-icon">👤</span>
+          <span class="settings-option-copy"><strong>Account</strong><small>View your account information</small></span>
+          <span class="settings-option-arrow">›</span>
+        </button>
+        <button id="activation-option-btn" class="settings-option">
+          <span class="settings-option-icon">🔐</span>
+          <span class="settings-option-copy"><strong>Activation Code</strong><small>View and copy your permanent code</small></span>
+          <span class="settings-option-arrow">›</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Account Screen -->
+    <div id="account-screen" class="screen hidden">
+      <header class="app-header">
+        <button id="account-back-btn" class="btn-icon">←</button>
+        <h2>Account</h2>
+        <div></div>
+      </header>
+      <div class="content">
         <div class="section-title">Account Information</div>
+        <div class="card account-info-card">
+          <div class="account-avatar" id="account-avatar">👤</div>
+          <div class="account-info-row"><span>Name</span><strong id="account-name">Loading...</strong></div>
+          <div class="account-info-row"><span>Email</span><strong id="account-email">Loading...</strong></div>
+          <div class="account-info-row"><span>Devices added</span><strong id="account-device-count">0</strong></div>
+        </div>
+        <p class="small-note">More account details and profile settings will be added in a future update.</p>
+      </div>
+    </div>
+
+    <!-- Activation Code Screen -->
+    <div id="activation-code-screen" class="screen hidden">
+      <header class="app-header">
+        <button id="activation-back-btn" class="btn-icon">←</button>
+        <h2>Activation Code</h2>
+        <div></div>
+      </header>
+      <div class="content">
+        <div class="section-title">Permanent Account Code</div>
         <div class="card">
           <div class="label">Activation Code</div>
           <div class="activation-row">
             <span id="activation-code-display" class="activation-code">Loading...</span>
-            <button id="copy-code-btn" class="btn-icon" title="Copy">📋</button>
+            <button id="copy-code-btn" class="btn-icon" title="Copy activation code">📋</button>
           </div>
           <p class="small-note" style="color:#d97706;font-weight:600;">⚠️ SECURITY WARNING: This is your permanent Watchnow access code. Anyone who has it may connect a device to your account and access your Watchnow information. Never share it, post it, or include it in screenshots. Keep it private like a password.</p>
           <div id="qr-container" style="margin-top:20px; text-align:center;">
             <canvas id="activation-qr"></canvas>
-            <p class="small-note">Scan this QR with Partypark app</p>
+            <p class="small-note">QR code support is coming soon.</p>
           </div>
         </div>
       </div>
@@ -145,6 +185,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-storage-compat.js"></script>
 
   <script src="js/firebase-config.js"></script>
-  <script src="js/app.js?v=activation-20261115-5"></script>
+  <script src="js/app.js?v=account-menu-20261115-1"></script>
 </body>
 </html>
