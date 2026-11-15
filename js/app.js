@@ -87,8 +87,13 @@ function isValidActivationCode(code) {
 function generateQR(code) {
   const canvas = document.getElementById('activation-qr');
   if (!canvas || !code) return;
+  // QR rendering is optional; it must never prevent Firebase activation-code display.
+  if (typeof QRCode === 'undefined' || typeof QRCode.toCanvas !== 'function') {
+    console.warn('QR library is unavailable; activation code remains usable.');
+    return;
+  }
   QRCode.toCanvas(canvas, code, { width: 200, margin: 2 }, function (error) {
-    if (error) console.error(error);
+    if (error) console.error('QR generation failed:', error);
   });
 }
 
