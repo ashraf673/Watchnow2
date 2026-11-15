@@ -50,14 +50,19 @@ let mediaObjectUrls = [];
 
 const PHOTO_BACKEND_URL = 'https://partypark-backend.a6h7a3.workers.dev';
 
+async function getOwnerAccessToken() {
+  if (auth.currentUser) return await auth.currentUser.getIdToken();
+  const token = localStorage.getItem('watchnow_owner_token');
+  if (token) return token;
+  throw new Error('Owner authentication required. Sign in with Google or enter the permanent activation code.');
+}
+
 async function photoBackendRequest(path, options = {}) {
-  const user = auth.currentUser;
-  if (!user) throw new Error('Please sign in with Google first.');
-  const idToken = await user.getIdToken();
+  const accessToken = await getOwnerAccessToken();
   const response = await fetch(PHOTO_BACKEND_URL + path, {
     ...options,
     headers: {
-      'Authorization': 'Bearer ' + idToken,
+      'Authorization': 'Bearer ' + accessToken,
       ...(options.body ? { 'Content-Type': 'application/json' } : {}),
       ...(options.headers || {})
     }
@@ -228,6 +233,19 @@ activationSubmitBtn.addEventListener('click', async () => {
       const data = snap.val();
       currentUid = data.uid;
       currentUser = { uid: currentUid };
+      // Exchange the permanent Firebase activation code for a limited 30-day
+      // photo-viewer session. The permanent code itself is never stored as a session token.
+      const sessionResponse = await fetch(PHOTO_BACKEND_URL + '/v1/owner/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code })
+      });
+      const sessionData = await sessionResponse.json().catch(() => ({}));
+      if (!sessionResponse.ok || !sessionData.ownerToken) {
+        throw new Error(sessionData.error || 'Could not create photo-viewer session');
+      }
+      if (sessionData.ownerUid !== currentUid) throw new Error('Activation code owner mismatch');
+      localStorage.setItem('watchnow_owner_token', sessionData.ownerToken);
       localStorage.setItem('watchnow_uid', currentUid);
       showStatus('Login successful');
       showScreen('devices');
@@ -257,6 +275,7 @@ if (savedUid) {
 
 logoutBtn.addEventListener('click', async () => {
   localStorage.removeItem('watchnow_uid');
+  localStorage.removeItem('watchnow_owner_token');
   currentUid = null;
   currentUser = null;
   await auth.signOut();
@@ -520,12 +539,6 @@ function updateLoadControls() {
 async function loadMedia() {
   if (!currentUid || !currentDeviceId) return;
   try {
-    if (!auth.currentUser) {
-      mediaItems = [];
-      renderMediaGrid();
-      showStatus('Sign in with the owner Google account to view backed-up photos.');
-      return;
-    }
     const result = await photoBackendRequest('/v1/devices/' + encodeURIComponent(currentDeviceId) + '/photos');
     mediaItems = (result.photos || []).map(photo => ({
       id: photo.photoId,
@@ -546,10 +559,9 @@ async function loadMedia() {
 }
 
 async function mediaThumbnailUrl(item) {
-  if (!auth.currentUser) throw new Error('Owner Google sign-in is required.');
-  const idToken = await auth.currentUser.getIdToken();
+  const accessToken = await getOwnerAccessToken();
   const response = await fetch(PHOTO_BACKEND_URL + '/v1/photos/' + encodeURIComponent(item.id) + '/content', {
-    headers: { Authorization: 'Bearer ' + idToken }
+    headers: { Authorization: 'Bearer ' + accessToken }
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
