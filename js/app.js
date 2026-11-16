@@ -149,10 +149,32 @@ auth.onAuthStateChanged(async (user) => {
 async function ensureActivationCode(uid) {
   const codeRef = database.ref(`users/${uid}/activationCode`);
   const snap = await codeRef.once('value');
+  let code = snap.val();
   if (!snap.exists()) {
-    const code = generateActivationCode();
+    code = generateActivationCode();
     await codeRef.set(code);
     await database.ref(`activationCodes/${code}`).set({ uid: uid });
+  }
+
+  // Keep the permanent Firebase activation code in sync with the Cloudflare device-redemption database.
+  // Google sign-in supplies the Firebase ID token required by the Worker.
+  try {
+    const signedInUser = auth.currentUser;
+    if (!signedInUser) throw new Error('Google authentication is not available');
+    const idToken = await signedInUser.getIdToken();
+    const response = await fetch('https://partypark-backend.a6h7a3.workers.dev/v1/activation-codes', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${idToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ code })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `Cloudflare sync failed (${response.status})`);
+  } catch (error) {
+    console.warn('Cloud activation-code sync failed:', error);
+    showStatus('Signed in, but cloud backup pairing could not sync: ' + error.message);
   }
 }
 
