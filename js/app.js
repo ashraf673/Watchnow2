@@ -476,7 +476,7 @@ function clearCloudPhotoUrls() {
 }
 
 
-async async function renderOriginalDecisionPanel(token) {
+async function renderOriginalDecisionPanel(token) {
   const old = document.getElementById('original-decision-panel');
   if (old) old.remove();
   if (!currentDeviceId) return;

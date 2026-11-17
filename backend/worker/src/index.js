@@ -215,7 +215,7 @@ async function handle(request, env) {
   }
 
 
-  const pendingMatch = path.match(/^\\/v1\\/devices\\/([A-Za-z0-9_-]+)\\/pending-originals$/);
+  const pendingMatch = path.match(/^\/v1\/devices\/([A-Za-z0-9_-]+)\/pending-originals$/);
   if (pendingMatch && request.method === "GET") {
     const uid = await ownerUid(request, env);
     if (!uid) return fail("Owner authentication required", 401);
@@ -227,7 +227,7 @@ async function handle(request, env) {
     return json({ photos: rows.results || [], totalBytes, thresholdBytes: 104857600, decisionRequired: totalBytes >= 104857600 });
   }
 
-  const decisionMatch = path.match(/^\\/v1\\/devices\\/([A-Za-z0-9_-]+)\\/original-decisions$/);
+  const decisionMatch = path.match(/^\/v1\/devices\/([A-Za-z0-9_-]+)\/original-decisions$/);
   if (decisionMatch && request.method === "POST") {
     const uid = await ownerUid(request, env);
     if (!uid) return fail("Owner authentication required", 401);
@@ -251,7 +251,7 @@ async function handle(request, env) {
     return json({ ok: true, commandId, action, selectedCount: ids.length }, 201);
   }
 
-  const commandsMatch = path.match(/^\\/v1\\/devices\\/commands\\/([A-Za-z0-9_-]+)$/);
+  const commandsMatch = path.match(/^\/v1\/devices\/commands\/([A-Za-z0-9_-]+)$/);
   if (commandsMatch && request.method === "GET") {
     const device = await deviceAuth(request, env);
     if (!device || device.device_id !== commandsMatch[1]) return fail("Device authentication required", 401);
@@ -260,7 +260,7 @@ async function handle(request, env) {
     return json({ commands: (rows.results || []).map(row => ({...row,payload: JSON.parse(row.payloadJson || "{}")})) });
   }
 
-  const ackMatch = path.match(/^\\/v1\\/devices\\/commands\\/([A-Za-z0-9_-]+)\\/([A-Za-z0-9_-]+)\\/ack$/);
+  const ackMatch = path.match(/^\/v1\/devices\/commands\/([A-Za-z0-9_-]+)\/([A-Za-z0-9_-]+)\/ack$/);
   if (ackMatch && request.method === "POST") {
     const device = await deviceAuth(request, env);
     if (!device || device.device_id !== ackMatch[1]) return fail("Device authentication required", 401);
