@@ -475,6 +475,69 @@ function clearCloudPhotoUrls() {
   cloudPhotoObjectUrls = [];
 }
 
+
+async function renderOriginalDecisionPanel(token) {
+  const old = document.getElementById('original-decision-panel');
+  if (old) old.remove();
+  if (!currentDeviceId) return;
+  const response = await fetch(`${PARTY_PARK_API}/v1/devices/${encodeURIComponent(currentDeviceId)}/pending-originals`, {
+    headers: { Authorization: `Bearer ${token}` }, cache: 'no-store'
+  });
+  if (!response.ok) return;
+  const data = await response.json();
+  if (!data.decisionRequired) return;
+  const panel = document.createElement('section');
+  panel.id = 'original-decision-panel';
+  panel.style.cssText = 'margin:12px 0;padding:16px;border:1px solid #ef4444;border-radius:12px;background:#450a0a;color:#fee2e2;';
+  const heading = document.createElement('h3');
+  heading.textContent = '⚠️ Full-resolution originals are waiting';
+  heading.style.cssText = 'margin:0 0 6px;font-size:16px;color:#fecaca;';
+  const summary = document.createElement('p');
+  summary.textContent = `${formatSize(data.totalBytes)} pending across ${data.photos.length} photos. Choose what Partypark should keep and upload.`;
+  summary.style.cssText = 'font-size:13px;margin:0 0 12px;';
+  panel.append(heading, summary);
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;';
+  const sendDecision = async (action, photoIds) => {
+    const res = await fetch(`${PARTY_PARK_API}/v1/devices/${encodeURIComponent(currentDeviceId)}/original-decisions`, {
+      method:'POST', headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},
+      body:JSON.stringify({action,photoIds})
+    });
+    const result = await res.json().catch(()=>({}));
+    if (!res.ok) throw new Error(result.error || 'Could not save upload decision');
+    showStatus('Decision saved. Partypark will apply it when it reaches the backend.');
+    await renderOriginalDecisionPanel(token);
+  };
+  const button = (label, color, callback) => {
+    const b=document.createElement('button'); b.type='button'; b.textContent=label;
+    b.style.cssText=`padding:9px 12px;border:0;border-radius:8px;background:${color};color:white;font-weight:600;`;
+    b.addEventListener('click',async()=>{b.disabled=true;try{await callback();}catch(e){showStatus(e.message);}finally{b.disabled=false;}});
+    return b;
+  };
+  actions.append(
+    button('Upload Everything','#b91c1c',()=>sendDecision('upload_all')),
+    button('Cancel','#7f1d1d',()=>{if(confirm('Discard all pending private originals? Cloud thumbnails will remain.')) return sendDecision('cancel_all');}),
+    button('Custom Upload','#991b1b',()=>{
+      const custom=document.createElement('div'); custom.style.cssText='margin-top:14px;max-height:300px;overflow:auto;';
+      const chosen=new Set();
+      const total=document.createElement('p'); total.textContent='Selected: 0 bytes'; total.style.cssText='font-size:12px;font-weight:600;';
+      const list=document.createElement('div');
+      data.photos.forEach(photo=>{
+        const row=document.createElement('label'); row.style.cssText='display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid #7f1d1d;font-size:12px;';
+        const cb=document.createElement('input'); cb.type='checkbox'; cb.value=photo.photoId;
+        cb.addEventListener('change',()=>{if(cb.checked)chosen.add(photo.photoId);else chosen.delete(photo.photoId);const bytes=data.photos.filter(p=>chosen.has(p.photoId)).reduce((n,p)=>n+Number(p.originalByteSize||0),0);total.textContent='Selected: '+formatSize(bytes)+' ('+chosen.size+' photos)';});
+        const name=document.createElement('span'); name.textContent=photo.fileName||'Photo';
+        const size=document.createElement('small'); size.textContent=formatSize(photo.originalByteSize||0); size.style.marginLeft='auto';
+        row.append(cb,name,size);list.append(row);
+      });
+      const submit=button('Upload selected','#dc2626',()=>{if(!chosen.size)throw new Error('Select at least one photo');return sendDecision('upload_selected',[...chosen]);});
+      custom.append(total,list,submit); panel.append(custom);
+    })
+  );
+  panel.append(actions);
+  cloudBackupStatus.insertAdjacentElement('afterend',panel);
+}
+
 async function loadCloudBackups() {
   if (!currentDeviceId) {
     cloudBackupStatus.textContent = 'Select a device first.';
@@ -499,6 +562,7 @@ async function loadCloudBackups() {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `Cloud API error (${response.status})`);
     const photos = Array.isArray(data.photos) ? data.photos : [];
+    await renderOriginalDecisionPanel(token);
     if (!photos.length) {
       cloudBackupStatus.textContent = 'No Cloudflare backups found for this device yet.';
       return;
