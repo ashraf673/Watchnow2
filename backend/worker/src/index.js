@@ -322,7 +322,7 @@ async function handle(request, env) {
     if (!fileId) return fail("driveFileId is required");
     const metaResponse = await driveFetch(env, "/files/"+encodeURIComponent(fileId)+"?fields=id,name,mimeType,size,createdTime,imageMediaMetadata,parents,appProperties");
     const file = await metaResponse.json();
-    if (!metaResponse.ok || !file.id || !(file.parents || []).includes(await ensureDeviceFolder(env, device)) || file.appProperties?.partyparkDeviceId !== device.device_id) return fail("Uploaded Drive file does not belong to this device",403);
+    if (!metaResponse.ok || !file.id || !(file.parents || []).includes(await ensureDeviceFolder(env, device)) || file.appProperties?.partyparkDeviceId !== device.device_id || file.appProperties?.partyparkAssetType !== session.asset_type || (session.asset_type === "original" && file.appProperties?.partyparkPhotoId !== session.photo_id)) return fail("Uploaded Drive file does not belong to this upload session",403);
     const now = Date.now();
     const photoId = session.photo_id || randomToken(18);
     if (session.asset_type === "original") {

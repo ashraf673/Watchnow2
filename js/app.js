@@ -567,42 +567,16 @@ async function loadCloudBackups() {
       cloudBackupStatus.textContent = 'No Cloudflare backups found for this device yet.';
       return;
     }
-    cloudBackupStatus.textContent = `${photos.length} cloud photo(s). Select photos to delete, or open one to view it.`;
-    const previousSelectionBar = document.getElementById('cloud-photo-selection-bar'); if (previousSelectionBar) previousSelectionBar.remove();
-    const selectionBar = document.createElement('div'); selectionBar.id='cloud-photo-selection-bar';
-    selectionBar.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0;';
-    const selectedIds = new Set();
-    const selectedLabel = document.createElement('span'); selectedLabel.textContent = '0 selected'; selectedLabel.style.cssText='font-size:12px;color:#cbd5e1;';
-    const selectAll = document.createElement('button'); selectAll.type='button'; selectAll.textContent='Select all'; selectAll.className='btn btn-secondary';
-    const clearSelection = document.createElement('button'); clearSelection.type='button'; clearSelection.textContent='Clear'; clearSelection.className='btn btn-secondary';
-    const deleteSelected = document.createElement('button'); deleteSelected.type='button'; deleteSelected.textContent='Delete selected'; deleteSelected.className='btn btn-primary'; deleteSelected.style.background='#b91c1c';
-    const refreshSelection = () => { selectedLabel.textContent = `${selectedIds.size} selected`; deleteSelected.disabled = selectedIds.size===0; };
-    const deleteIds = async ids => {
-      if (!ids.length || !confirm(`Permanently delete ${ids.length} cloud photo(s), including available originals? This cannot be undone.`)) return;
-      deleteSelected.disabled=true;
-      const res=await fetch(`${PARTY_PARK_API}/v1/photos/bulk-delete`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({photoIds:ids})});
-      const result=await res.json().catch(()=>({}));
-      if (!res.ok && res.status!==207) throw new Error(result.error||'Cloud delete failed');
-      showStatus(`${(result.deleted||[]).length} deleted; ${(result.failed||[]).length} failed.`);
-      await loadCloudBackups();
-    };
-    selectAll.addEventListener('click',()=>{photos.forEach(p=>selectedIds.add(p.photoId));cloudBackupGrid.querySelectorAll('input[data-photo-select]').forEach(c=>c.checked=true);refreshSelection();});
-    clearSelection.addEventListener('click',()=>{selectedIds.clear();cloudBackupGrid.querySelectorAll('input[data-photo-select]').forEach(c=>c.checked=false);refreshSelection();});
-    deleteSelected.addEventListener('click',()=>deleteIds([...selectedIds]).catch(e=>showStatus(e.message)));
-    selectionBar.append(selectAll,clearSelection,selectedLabel,deleteSelected); cloudBackupGrid.before(selectionBar); refreshSelection();
+    cloudBackupStatus.textContent = `${photos.length} cloud photo(s). Tap a photo to load its thumbnail.`;
     photos.forEach(photo => {
-      const card = document.createElement('div');
-      card.setAttribute('role','button'); card.tabIndex=0;
+      const card = document.createElement('button');
+      card.type = 'button';
       card.className = 'media-item';
       card.style.cssText = 'position:relative;aspect-ratio:1;background:#1e293b;border:0;border-radius:8px;overflow:hidden;color:#e2e8f0;padding:8px;cursor:pointer;';
       const label = document.createElement('span');
       label.textContent = photo.fileName || 'Backed-up photo';
       label.style.cssText = 'font-size:11px;overflow-wrap:anywhere;';
       card.appendChild(label);
-      const select = document.createElement('input'); select.type='checkbox'; select.dataset.photoSelect='1'; select.setAttribute('aria-label','Select '+(photo.fileName||'photo')); select.style.cssText='position:absolute;top:7px;right:7px;width:20px;height:20px;z-index:2;';
-      select.addEventListener('click',e=>e.stopPropagation()); select.addEventListener('change',()=>{if(select.checked)selectedIds.add(photo.photoId);else selectedIds.delete(photo.photoId);refreshSelection();}); card.appendChild(select);
-      const remove = document.createElement('button'); remove.type='button'; remove.textContent='×'; remove.title='Delete photo'; remove.style.cssText='position:absolute;top:5px;left:5px;z-index:3;border:0;border-radius:50%;width:25px;height:25px;background:#991b1b;color:white;font-size:18px;';
-      remove.addEventListener('click',e=>{e.stopPropagation();deleteIds([photo.photoId]).catch(err=>showStatus(err.message));}); card.appendChild(remove);
       const date = document.createElement('small');
       date.textContent = photo.capturedAt ? new Date(photo.capturedAt).toLocaleString() : '';
       date.style.cssText = 'position:absolute;bottom:5px;left:5px;right:5px;font-size:9px;color:#cbd5e1;';
