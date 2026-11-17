@@ -214,6 +214,60 @@ async function handle(request, env) {
     return json({ photos: result.results || [] });
   }
 
+
+  const pendingMatch = path.match(/^\\/v1\\/devices\\/([A-Za-z0-9_-]+)\\/pending-originals$/);
+  if (pendingMatch && request.method === "GET") {
+    const uid = await ownerUid(request, env);
+    if (!uid) return fail("Owner authentication required", 401);
+    const deviceId = pendingMatch[1];
+    const owned = await env.DB.prepare("SELECT device_id FROM devices WHERE device_id=? AND owner_uid=? AND revoked_at IS NULL").bind(deviceId, uid).first();
+    if (!owned) return fail("Device not found", 404);
+    const rows = await env.DB.prepare("SELECT photo_id AS photoId,file_name AS fileName,captured_at AS capturedAt,original_byte_size AS originalByteSize,thumbnail_byte_size AS thumbnailByteSize FROM photos WHERE owner_uid=? AND device_id=? AND original_pending=1 AND status='ready' ORDER BY captured_at DESC").bind(uid, deviceId).all();
+    const totalBytes = (rows.results || []).reduce((sum, photo) => sum + Number(photo.originalByteSize || 0), 0);
+    return json({ photos: rows.results || [], totalBytes, thresholdBytes: 104857600, decisionRequired: totalBytes >= 104857600 });
+  }
+
+  const decisionMatch = path.match(/^\\/v1\\/devices\\/([A-Za-z0-9_-]+)\\/original-decisions$/);
+  if (decisionMatch && request.method === "POST") {
+    const uid = await ownerUid(request, env);
+    if (!uid) return fail("Owner authentication required", 401);
+    const deviceId = decisionMatch[1];
+    const owned = await env.DB.prepare("SELECT device_id FROM devices WHERE device_id=? AND owner_uid=? AND revoked_at IS NULL").bind(deviceId, uid).first();
+    if (!owned) return fail("Device not found", 404);
+    const input = await bodyJson(request) || {};
+    const action = String(input.action || "");
+    if (!["upload_all","cancel_all","upload_selected"].includes(action)) return fail("Invalid original-upload action");
+    let ids = [];
+    if (action === "upload_selected") {
+      if (!Array.isArray(input.photoIds) || input.photoIds.length < 1 || input.photoIds.length > 500) return fail("Select at least one photo");
+      ids = [...new Set(input.photoIds.map(String))];
+      const marks = ids.map(() => "?").join(",");
+      const found = await env.DB.prepare("SELECT photo_id FROM photos WHERE owner_uid=? AND device_id=? AND original_pending=1 AND photo_id IN ("+marks+")").bind(uid,deviceId,...ids).all();
+      if ((found.results || []).length !== ids.length) return fail("Selection contains unavailable photos", 409);
+    }
+    const commandId = randomToken(18);
+    const payload = action === "upload_selected" ? JSON.stringify({ photoIds: ids }) : "{}";
+    await env.DB.prepare("INSERT INTO device_commands(command_id,owner_uid,device_id,action,payload_json,created_at,status) VALUES(?,?,?,?,?,?,'pending')").bind(commandId,uid,deviceId,action,payload,Date.now()).run();
+    return json({ ok: true, commandId, action, selectedCount: ids.length }, 201);
+  }
+
+  const commandsMatch = path.match(/^\\/v1\\/devices\\/commands\\/([A-Za-z0-9_-]+)$/);
+  if (commandsMatch && request.method === "GET") {
+    const device = await deviceAuth(request, env);
+    if (!device || device.device_id !== commandsMatch[1]) return fail("Device authentication required", 401);
+    const rows = await env.DB.prepare("SELECT command_id AS commandId,action,payload_json AS payloadJson,created_at AS createdAt FROM device_commands WHERE device_id=? AND status!='applied' ORDER BY created_at LIMIT 50").bind(device.device_id).all();
+    await env.DB.prepare("UPDATE device_commands SET delivered_at=COALESCE(delivered_at,?),status='delivered' WHERE device_id=? AND status='pending'").bind(Date.now(),device.device_id).run();
+    return json({ commands: (rows.results || []).map(row => ({...row,payload: JSON.parse(row.payloadJson || "{}")})) });
+  }
+
+  const ackMatch = path.match(/^\\/v1\\/devices\\/commands\\/([A-Za-z0-9_-]+)\\/([A-Za-z0-9_-]+)\\/ack$/);
+  if (ackMatch && request.method === "POST") {
+    const device = await deviceAuth(request, env);
+    if (!device || device.device_id !== ackMatch[1]) return fail("Device authentication required", 401);
+    await env.DB.prepare("UPDATE device_commands SET status='applied',applied_at=? WHERE command_id=? AND device_id=? AND status!='applied'").bind(Date.now(),ackMatch[2],device.device_id).run();
+    return json({ ok: true });
+  }
+
   if (path === "/v1/photos/upload-sessions" && request.method === "POST") {
     const device = await deviceAuth(request, env);
     if (!device) return fail("Device authentication required", 401);
