@@ -275,8 +275,15 @@ async function handle(request, env) {
     if (!input || typeof input.fileName !== "string" || input.fileName.length > 240) return fail("fileName is required");
     const mimeType = String(input.mimeType || "image/jpeg");
     if (!mimeType.startsWith("image/")) return fail("Only image uploads are supported");
+    const assetType = input.assetType === "original" ? "original" : "thumbnail";
+    const photoId = String(input.photoId || "");
+    if (assetType === "original") {
+      if (!/^[A-Za-z0-9_-]{8,100}$/.test(photoId)) return fail("photoId is required for original upload");
+      const pending = await env.DB.prepare("SELECT photo_id FROM photos WHERE photo_id=? AND owner_uid=? AND device_id=? AND original_pending=1").bind(photoId,device.owner_uid,device.device_id).first();
+      if (!pending) return fail("Pending photo not found",404);
+    }
     const folderId = await ensureDeviceFolder(env, device);
-    const metadata = { name: input.fileName.replace(/[\\/]/g,"_"), mimeType, parents: [folderId], appProperties: { partyparkDeviceId: device.device_id } };
+    const metadata = { name: input.fileName.replace(/[\\/]/g,"_"), mimeType, parents: [folderId], appProperties: { partyparkDeviceId: device.device_id, partyparkPhotoId: photoId, partyparkAssetType: assetType } };
     const response = await driveFetch(env, "/files?uploadType=resumable&fields=id,name,mimeType,size,createdTime", {
       method: "POST", headers: { "content-type": "application/json", "x-upload-content-type": mimeType }, body: JSON.stringify(metadata)
     });
@@ -284,8 +291,8 @@ async function handle(request, env) {
     const sessionUrl = response.headers.get("Location");
     if (!sessionUrl) return fail("Drive did not return an upload session", 502);
     const sessionId = randomToken(18), now = Date.now();
-    await env.DB.prepare("INSERT INTO upload_sessions(session_id,owner_uid,device_id,drive_session_url,file_name,mime_type,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?)")
-      .bind(sessionId,device.owner_uid,device.device_id,sessionUrl,metadata.name,mimeType,now,now+UPLOAD_SESSION_TTL_MS).run();
+    await env.DB.prepare("INSERT INTO upload_sessions(session_id,owner_uid,device_id,drive_session_url,file_name,mime_type,created_at,expires_at,photo_id,asset_type) VALUES(?,?,?,?,?,?,?,?,?,?)")
+      .bind(sessionId,device.owner_uid,device.device_id,sessionUrl,metadata.name,mimeType,now,now+UPLOAD_SESSION_TTL_MS,photoId || null,assetType).run();
     return json({ sessionId, maxChunkBytes: MAX_CHUNK_BYTES }, 201);
   }
 
@@ -316,11 +323,17 @@ async function handle(request, env) {
     const metaResponse = await driveFetch(env, "/files/"+encodeURIComponent(fileId)+"?fields=id,name,mimeType,size,createdTime,imageMediaMetadata,parents,appProperties");
     const file = await metaResponse.json();
     if (!metaResponse.ok || !file.id || !(file.parents || []).includes(await ensureDeviceFolder(env, device)) || file.appProperties?.partyparkDeviceId !== device.device_id) return fail("Uploaded Drive file does not belong to this device",403);
-    const now = Date.now(), photoId = randomToken(18);
-    await env.DB.prepare("INSERT INTO photos(photo_id,owner_uid,device_id,drive_file_id,file_name,mime_type,byte_size,captured_at,uploaded_at,expires_at,width,height,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'ready')")
-      .bind(photoId,device.owner_uid,device.device_id,file.id,file.name,file.mimeType || session.mime_type,Number(file.size||0),Number(input.capturedAt||0)||null,now,Number.MAX_SAFE_INTEGER,Number(file.imageMediaMetadata?.width||0)||null,Number(file.imageMediaMetadata?.height||0)||null).run();
+    const now = Date.now();
+    const photoId = session.photo_id || randomToken(18);
+    if (session.asset_type === "original") {
+      await env.DB.prepare("UPDATE photos SET original_drive_file_id=?,original_byte_size=?,original_uploaded_at=?,original_pending=0 WHERE photo_id=? AND owner_uid=? AND device_id=?")
+        .bind(file.id,Number(file.size||0),now,photoId,device.owner_uid,device.device_id).run();
+    } else {
+      await env.DB.prepare("INSERT INTO photos(photo_id,owner_uid,device_id,drive_file_id,file_name,mime_type,byte_size,captured_at,uploaded_at,expires_at,width,height,status,thumbnail_byte_size,original_byte_size,original_pending) VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'ready',?,?,?)")
+        .bind(photoId,device.owner_uid,device.device_id,file.id,file.name,file.mimeType || session.mime_type,Number(file.size||0),Number(input.capturedAt||0)||null,now,Number.MAX_SAFE_INTEGER,Number(file.imageMediaMetadata?.width||0)||null,Number(file.imageMediaMetadata?.height||0)||null,Number(file.size||0),Number(input.originalByteSize||0),Number(input.originalByteSize||0)>0?1:0).run();
+    }
     await env.DB.prepare("DELETE FROM upload_sessions WHERE session_id=?").bind(session.session_id).run();
-    return json({ photoId, uploadedAt: now, expiresAt: null },201);
+    return json({ photoId, uploadedAt: now, assetType: session.asset_type, expiresAt: null },session.asset_type === "original" ? 200 : 201);
   }
 
   const contentMatch = path.match(/^\/v1\/photos\/([A-Za-z0-9_-]+)\/content$/);
