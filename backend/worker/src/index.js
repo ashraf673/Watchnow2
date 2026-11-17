@@ -210,7 +210,7 @@ async function handle(request, env) {
   if (photoListMatch && request.method === "GET") {
     const uid = await ownerUid(request, env);
     if (!uid) return fail("Owner authentication required", 401);
-    const result = await env.DB.prepare("SELECT photo_id AS photoId,device_id AS deviceId,file_name AS fileName,mime_type AS mimeType,byte_size AS byteSize,captured_at AS capturedAt,uploaded_at AS uploadedAt,expires_at AS expiresAt,width,height FROM photos WHERE owner_uid=? AND device_id=? AND status='ready' ORDER BY uploaded_at DESC LIMIT 500").bind(uid,photoListMatch[1]).all();
+    const result = await env.DB.prepare("SELECT photo_id AS photoId,device_id AS deviceId,file_name AS fileName,mime_type AS mimeType,byte_size AS byteSize,original_byte_size AS originalByteSize,CASE WHEN original_drive_file_id IS NULL THEN 0 ELSE 1 END AS hasOriginal,captured_at AS capturedAt,uploaded_at AS uploadedAt,expires_at AS expiresAt,width,height FROM photos WHERE owner_uid=? AND device_id=? AND status='ready' ORDER BY uploaded_at DESC LIMIT 500").bind(uid,photoListMatch[1]).all();
     return json({ photos: result.results || [] });
   }
 
@@ -340,9 +340,11 @@ async function handle(request, env) {
   if (contentMatch && request.method === "GET") {
     const uid = await ownerUid(request, env);
     if (!uid) return fail("Owner authentication required",401);
-    const photo = await env.DB.prepare("SELECT drive_file_id,file_name,mime_type FROM photos WHERE photo_id=? AND owner_uid=? AND status='ready'").bind(contentMatch[1],uid).first();
+    const variant = url.searchParams.get("variant") === "thumbnail" ? "thumbnail" : "best";
+    const sql = variant === "thumbnail" ? "SELECT drive_file_id AS content_file_id,file_name,mime_type FROM photos WHERE photo_id=? AND owner_uid=? AND status='ready'" : "SELECT COALESCE(original_drive_file_id,drive_file_id) AS content_file_id,file_name,mime_type FROM photos WHERE photo_id=? AND owner_uid=? AND status='ready'";
+    const photo = await env.DB.prepare(sql).bind(contentMatch[1],uid).first();
     if (!photo) return fail("Photo not found",404);
-    const response = await driveFetch(env,"/files/"+encodeURIComponent(photo.drive_file_id)+"?alt=media");
+    const response = await driveFetch(env,"/files/"+encodeURIComponent(photo.content_file_id)+"?alt=media");
     if (!response.ok) return fail("Google Drive download failed",502);
     const headers = new Headers({ "content-type": photo.mime_type, "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(photo.file_name)}`, "cache-control":"private, no-store" });
     return new Response(response.body,{headers});
