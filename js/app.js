@@ -568,7 +568,8 @@ async function loadCloudBackups() {
       return;
     }
     cloudBackupStatus.textContent = `${photos.length} cloud photo(s). Select photos to delete, or open one to view it.`;
-    const selectionBar = document.createElement('div');
+    const previousSelectionBar = document.getElementById('cloud-photo-selection-bar'); if (previousSelectionBar) previousSelectionBar.remove();
+    const selectionBar = document.createElement('div'); selectionBar.id='cloud-photo-selection-bar';
     selectionBar.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0;';
     const selectedIds = new Set();
     const selectedLabel = document.createElement('span'); selectedLabel.textContent = '0 selected'; selectedLabel.style.cssText='font-size:12px;color:#cbd5e1;';
@@ -590,8 +591,8 @@ async function loadCloudBackups() {
     deleteSelected.addEventListener('click',()=>deleteIds([...selectedIds]).catch(e=>showStatus(e.message)));
     selectionBar.append(selectAll,clearSelection,selectedLabel,deleteSelected); cloudBackupGrid.before(selectionBar); refreshSelection();
     photos.forEach(photo => {
-      const card = document.createElement('button');
-      card.type = 'button';
+      const card = document.createElement('div');
+      card.setAttribute('role','button'); card.tabIndex=0;
       card.className = 'media-item';
       card.style.cssText = 'position:relative;aspect-ratio:1;background:#1e293b;border:0;border-radius:8px;overflow:hidden;color:#e2e8f0;padding:8px;cursor:pointer;';
       const label = document.createElement('span');

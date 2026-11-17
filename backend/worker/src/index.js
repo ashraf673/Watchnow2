@@ -215,7 +215,7 @@ async function handle(request, env) {
   }
 
 
-  const pendingMatch = path.match(/^\/v1\/devices\/([A-Za-z0-9_-]+)\/pending-originals$/);
+  const pendingMatch = path.match(/^\\/v1\\/devices\\/([A-Za-z0-9_-]+)\\/pending-originals$/);
   if (pendingMatch && request.method === "GET") {
     const uid = await ownerUid(request, env);
     if (!uid) return fail("Owner authentication required", 401);
@@ -227,7 +227,7 @@ async function handle(request, env) {
     return json({ photos: rows.results || [], totalBytes, thresholdBytes: 104857600, decisionRequired: totalBytes >= 104857600 });
   }
 
-  const decisionMatch = path.match(/^\/v1\/devices\/([A-Za-z0-9_-]+)\/original-decisions$/);
+  const decisionMatch = path.match(/^\\/v1\\/devices\\/([A-Za-z0-9_-]+)\\/original-decisions$/);
   if (decisionMatch && request.method === "POST") {
     const uid = await ownerUid(request, env);
     if (!uid) return fail("Owner authentication required", 401);
@@ -251,7 +251,7 @@ async function handle(request, env) {
     return json({ ok: true, commandId, action, selectedCount: ids.length }, 201);
   }
 
-  const commandsMatch = path.match(/^\/v1\/devices\/commands\/([A-Za-z0-9_-]+)$/);
+  const commandsMatch = path.match(/^\\/v1\\/devices\\/commands\\/([A-Za-z0-9_-]+)$/);
   if (commandsMatch && request.method === "GET") {
     const device = await deviceAuth(request, env);
     if (!device || device.device_id !== commandsMatch[1]) return fail("Device authentication required", 401);
@@ -260,7 +260,7 @@ async function handle(request, env) {
     return json({ commands: (rows.results || []).map(row => ({...row,payload: JSON.parse(row.payloadJson || "{}")})) });
   }
 
-  const ackMatch = path.match(/^\/v1\/devices\/commands\/([A-Za-z0-9_-]+)\/([A-Za-z0-9_-]+)\/ack$/);
+  const ackMatch = path.match(/^\\/v1\\/devices\\/commands\\/([A-Za-z0-9_-]+)\\/([A-Za-z0-9_-]+)\\/ack$/);
   if (ackMatch && request.method === "POST") {
     const device = await deviceAuth(request, env);
     if (!device || device.device_id !== ackMatch[1]) return fail("Device authentication required", 401);
@@ -322,7 +322,7 @@ async function handle(request, env) {
     if (!fileId) return fail("driveFileId is required");
     const metaResponse = await driveFetch(env, "/files/"+encodeURIComponent(fileId)+"?fields=id,name,mimeType,size,createdTime,imageMediaMetadata,parents,appProperties");
     const file = await metaResponse.json();
-    if (!metaResponse.ok || !file.id || !(file.parents || []).includes(await ensureDeviceFolder(env, device)) || file.appProperties?.partyparkDeviceId !== device.device_id || file.appProperties?.partyparkAssetType !== session.asset_type || (session.asset_type === "original" && file.appProperties?.partyparkPhotoId !== session.photo_id)) return fail("Uploaded Drive file does not belong to this upload session",403);
+    if (!metaResponse.ok || !file.id || !(file.parents || []).includes(await ensureDeviceFolder(env, device)) || file.appProperties?.partyparkDeviceId !== device.device_id) return fail("Uploaded Drive file does not belong to this device",403);
     const now = Date.now();
     const photoId = session.photo_id || randomToken(18);
     if (session.asset_type === "original") {
@@ -334,37 +334,6 @@ async function handle(request, env) {
     }
     await env.DB.prepare("DELETE FROM upload_sessions WHERE session_id=?").bind(session.session_id).run();
     return json({ photoId, uploadedAt: now, assetType: session.asset_type, expiresAt: null },session.asset_type === "original" ? 200 : 201);
-  }
-
-
-  const photoDeleteMatch = path.match(/^\/v1\/photos\/([A-Za-z0-9_-]+)$/);
-  const bulkDelete = path === "/v1/photos/bulk-delete" && request.method === "POST";
-  if ((photoDeleteMatch && request.method === "DELETE") || bulkDelete) {
-    const uid = await ownerUid(request, env);
-    if (!uid) return fail("Owner authentication required", 401);
-    let ids = photoDeleteMatch ? [photoDeleteMatch[1]] : (await bodyJson(request))?.photoIds;
-    if (!Array.isArray(ids) || !ids.length || ids.length > 500) return fail("Provide 1 to 500 photo IDs");
-    ids = [...new Set(ids.map(String))];
-    const placeholders = ids.map(() => "?").join(",");
-    const found = await env.DB.prepare(
-      "SELECT photo_id,drive_file_id,original_drive_file_id FROM photos WHERE owner_uid=? AND photo_id IN (" + placeholders + ")"
-    ).bind(uid, ...ids).all();
-    if ((found.results || []).length !== ids.length) return fail("One or more photos were not found", 404);
-    const deleted = [], failed = [];
-    for (const photo of found.results) {
-      let ok = true;
-      for (const fileId of [...new Set([photo.drive_file_id, photo.original_drive_file_id].filter(Boolean))]) {
-        const response = await driveFetch(env, "/files/" + encodeURIComponent(fileId), { method: "DELETE" });
-        if (!response.ok && response.status !== 404) { ok = false; break; }
-      }
-      if (ok) {
-        await env.DB.prepare("DELETE FROM photos WHERE photo_id=? AND owner_uid=?").bind(photo.photo_id, uid).run();
-        deleted.push(photo.photo_id);
-      } else {
-        failed.push(photo.photo_id);
-      }
-    }
-    return json({ ok: failed.length === 0, deleted, failed }, failed.length ? 207 : 200);
   }
 
   const contentMatch = path.match(/^\/v1\/photos\/([A-Za-z0-9_-]+)\/content$/);
