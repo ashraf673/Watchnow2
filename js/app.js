@@ -31,6 +31,9 @@ const detailsTitle = document.getElementById('details-title');
 const deviceStatusInfo = document.getElementById('device-status-info');
 const mediaGrid = document.getElementById('media-grid');
 const mediaLoadControls = document.getElementById('media-load-controls');
+const cloudBackupGrid = document.getElementById('cloud-backup-grid');
+const cloudBackupStatus = document.getElementById('cloud-backup-status');
+const loadCloudBackupsBtn = document.getElementById('load-cloud-backups-btn');
 
 // State
 let currentUser = null;
@@ -146,10 +149,32 @@ auth.onAuthStateChanged(async (user) => {
 async function ensureActivationCode(uid) {
   const codeRef = database.ref(`users/${uid}/activationCode`);
   const snap = await codeRef.once('value');
+  let code = snap.val();
   if (!snap.exists()) {
-    const code = generateActivationCode();
+    code = generateActivationCode();
     await codeRef.set(code);
     await database.ref(`activationCodes/${code}`).set({ uid: uid });
+  }
+
+  // Keep the permanent Firebase activation code in sync with the Cloudflare device-redemption database.
+  // Google sign-in supplies the Firebase ID token required by the Worker.
+  try {
+    const signedInUser = auth.currentUser;
+    if (!signedInUser) throw new Error('Google authentication is not available');
+    const idToken = await signedInUser.getIdToken();
+    const response = await fetch('https://partypark-backend.a6h7a3.workers.dev/v1/activation-codes', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${idToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ code })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `Cloudflare sync failed (${response.status})`);
+  } catch (error) {
+    console.warn('Cloud activation-code sync failed:', error);
+    showStatus('Signed in, but cloud backup pairing could not sync: ' + error.message);
   }
 }
 
@@ -432,12 +457,104 @@ function openPhotos() {
   showScreen('photos');
   loadMedia();
   updateLoadControls();
+  cloudBackupGrid.innerHTML = '';
+  cloudBackupStatus.textContent = 'Photos backed up to Cloudflare and Google Drive appear here.';
 }
 
 function updateLoadControls() {
   // Scanning transfers only small thumbnails; it does not download original media.
-  mediaLoadControls.innerHTML = '<p style="color:#94a3b8;font-size:12px;">Thumbnails only · originals stay on the sender phone</p>';
+  mediaLoadControls.innerHTML = '<p style="color:#94a3b8;font-size:12px;">Firebase media · thumbnails only</p>';
 }
+
+
+const PARTY_PARK_API = 'https://partypark-backend.a6h7a3.workers.dev';
+let cloudPhotoObjectUrls = [];
+
+function clearCloudPhotoUrls() {
+  cloudPhotoObjectUrls.forEach(url => URL.revokeObjectURL(url));
+  cloudPhotoObjectUrls = [];
+}
+
+async function loadCloudBackups() {
+  if (!currentDeviceId) {
+    cloudBackupStatus.textContent = 'Select a device first.';
+    return;
+  }
+  const signedInUser = auth.currentUser;
+  if (!signedInUser) {
+    cloudBackupStatus.textContent = 'Please sign in with Google to view Cloud Backups. Activation-code-only login cannot authorize this gallery.';
+    return;
+  }
+
+  loadCloudBackupsBtn.disabled = true;
+  cloudBackupGrid.innerHTML = '';
+  clearCloudPhotoUrls();
+  cloudBackupStatus.textContent = 'Authenticating and loading backup list…';
+  try {
+    const token = await signedInUser.getIdToken();
+    const response = await fetch(`${PARTY_PARK_API}/v1/devices/${encodeURIComponent(currentDeviceId)}/photos`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store'
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Cloud API error (${response.status})`);
+    const photos = Array.isArray(data.photos) ? data.photos : [];
+    if (!photos.length) {
+      cloudBackupStatus.textContent = 'No Cloudflare backups found for this device yet.';
+      return;
+    }
+    cloudBackupStatus.textContent = `${photos.length} cloud photo(s). Tap a photo to load its thumbnail.`;
+    photos.forEach(photo => {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'media-item';
+      card.style.cssText = 'position:relative;aspect-ratio:1;background:#1e293b;border:0;border-radius:8px;overflow:hidden;color:#e2e8f0;padding:8px;cursor:pointer;';
+      const label = document.createElement('span');
+      label.textContent = photo.fileName || 'Backed-up photo';
+      label.style.cssText = 'font-size:11px;overflow-wrap:anywhere;';
+      card.appendChild(label);
+      const date = document.createElement('small');
+      date.textContent = photo.capturedAt ? new Date(photo.capturedAt).toLocaleString() : '';
+      date.style.cssText = 'position:absolute;bottom:5px;left:5px;right:5px;font-size:9px;color:#cbd5e1;';
+      card.appendChild(date);
+      card.addEventListener('click', async () => {
+        card.disabled = true;
+        label.textContent = 'Loading…';
+        try {
+          const imageResponse = await fetch(`${PARTY_PARK_API}/v1/photos/${encodeURIComponent(photo.photoId)}/content`, {
+            headers: { Authorization: `Bearer ${token}` },
+            cache: 'no-store'
+          });
+          if (!imageResponse.ok) {
+            const err = await imageResponse.json().catch(() => ({}));
+            throw new Error(err.error || `Photo request failed (${imageResponse.status})`);
+          }
+          const blob = await imageResponse.blob();
+          if (!blob.size) throw new Error('The server returned an empty image');
+          const objectUrl = URL.createObjectURL(blob);
+          cloudPhotoObjectUrls.push(objectUrl);
+          const img = document.createElement('img');
+          img.src = objectUrl;
+          img.alt = photo.fileName || 'Cloud backup';
+          img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+          card.replaceChildren(img);
+          card.title = photo.fileName || 'Cloud backup';
+        } catch (error) {
+          label.textContent = error.message || 'Could not load photo';
+          card.disabled = false;
+        }
+      });
+      cloudBackupGrid.appendChild(card);
+    });
+  } catch (error) {
+    console.error('Cloud backup load failed:', error);
+    cloudBackupStatus.textContent = error.message || 'Could not load Cloud Backups.';
+  } finally {
+    loadCloudBackupsBtn.disabled = false;
+  }
+}
+
+loadCloudBackupsBtn.addEventListener('click', loadCloudBackups);
 
 let mediaListener = null;
 let mediaRef = null;
