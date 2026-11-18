@@ -77,21 +77,15 @@
       <header class="app-header">
         <button id="photos-back-btn" class="btn-icon">←</button>
         <h2>Photos</h2>
-        <button id="scan-media-btn" class="btn-icon" title="Scan">🔄</button>
+        <button id="refresh-cloud-photos-btn" class="btn-icon" title="Refresh">🔄</button>
       </header>
       <div class="content">
-        <div style="display:flex; gap:8px; margin-bottom:16px;">
-          <button id="tab-photos" class="btn btn-secondary" style="flex:1;">Photos</button>
-          <button id="tab-videos" class="btn btn-secondary" style="flex:1;">Videos</button>
-        </div>
-        <div id="media-load-controls" style="margin-bottom:16px;"></div>
-        <div id="media-grid" class="media-grid"></div>
         <div id="cloud-backup-section" style="margin-top:28px;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;">
             <h3 style="margin:0;">Cloud Backups</h3>
             <button id="load-cloud-backups-btn" class="btn btn-secondary">Load cloud photos</button>
           </div>
-          <p id="cloud-backup-status" style="color:#94a3b8;font-size:12px;">Photos backed up to Cloudflare and Google Drive appear here.</p>
+          <p id="cloud-backup-status" style="color:#94a3b8;font-size:12px;">Photos and thumbnails stored in Google Drive appear here.</p>
           <div id="cloud-backup-grid" class="media-grid"></div>
         </div>
       </div>

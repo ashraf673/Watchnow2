@@ -29,8 +29,6 @@ const noStream = document.getElementById('no-stream');
 const viewerTitle = document.getElementById('viewer-title');
 const detailsTitle = document.getElementById('details-title');
 const deviceStatusInfo = document.getElementById('device-status-info');
-const mediaGrid = document.getElementById('media-grid');
-const mediaLoadControls = document.getElementById('media-load-controls');
 const cloudBackupGrid = document.getElementById('cloud-backup-grid');
 const cloudBackupStatus = document.getElementById('cloud-backup-status');
 const loadCloudBackupsBtn = document.getElementById('load-cloud-backups-btn');
@@ -47,8 +45,6 @@ let pendingSenderCandidates = [];
 let cameraEnabled = true;
 let offerListener = null;
 let senderCandidatesListener = null;
-let currentMediaTab = 'image';
-let mediaItems = [];
 
 function showStatus(msg) {
   const existing = document.getElementById('status-msg');
@@ -435,35 +431,11 @@ document.getElementById('open-files-btn').addEventListener('click', () => {
   showStatus('File Manager coming soon');
 });
 
-document.getElementById('scan-media-btn').addEventListener('click', async () => {
-  const button = document.getElementById('scan-media-btn');
-  button.disabled = true;
-  const sent = await sendCommand('scan_media');
-  if (sent) showStatus('Scan command sent. Waiting for sender...');
-  button.disabled = false;
-});
-
-document.getElementById('tab-photos').addEventListener('click', () => {
-  currentMediaTab = 'image';
-  renderMediaGrid();
-});
-
-document.getElementById('tab-videos').addEventListener('click', () => {
-  currentMediaTab = 'video';
-  renderMediaGrid();
-});
-
 function openPhotos() {
   showScreen('photos');
-  loadMedia();
-  updateLoadControls();
   cloudBackupGrid.innerHTML = '';
-  cloudBackupStatus.textContent = 'Photos backed up to Cloudflare and Google Drive appear here.';
-}
-
-function updateLoadControls() {
-  // Scanning transfers only small thumbnails; it does not download original media.
-  mediaLoadControls.innerHTML = '<p style="color:#94a3b8;font-size:12px;">Firebase media · thumbnails only</p>';
+  cloudBackupStatus.textContent = 'Photos and thumbnails stored in Google Drive appear here.';
+  loadCloudBackups();
 }
 
 
@@ -564,7 +536,7 @@ async function loadCloudBackups() {
     const photos = Array.isArray(data.photos) ? data.photos : [];
     await renderOriginalDecisionPanel(token);
     if (!photos.length) {
-      cloudBackupStatus.textContent = 'No Cloudflare backups found for this device yet.';
+      cloudBackupStatus.textContent = 'No Google Drive backups found for this device yet.';
       return;
     }
     cloudBackupStatus.textContent = `${photos.length} cloud photo(s). Tap a photo to load its thumbnail.`;
@@ -619,86 +591,9 @@ async function loadCloudBackups() {
 }
 
 loadCloudBackupsBtn.addEventListener('click', loadCloudBackups);
+document.getElementById('refresh-cloud-photos-btn').addEventListener('click', loadCloudBackups);
 
-let mediaListener = null;
-let mediaRef = null;
-let scanStatusRef = null;
-let scanStatusListener = null;
-function loadMedia() {
-  if (!currentUid || !currentDeviceId) return;
-  if (mediaRef && mediaListener) mediaRef.off('value', mediaListener);
-  if (scanStatusRef && scanStatusListener) scanStatusRef.off('value', scanStatusListener);
-  mediaRef = database.ref(`users/${currentUid}/devices/${currentDeviceId}/media`);
-  scanStatusRef = database.ref(`users/${currentUid}/devices/${currentDeviceId}/mediaScan`);
-  scanStatusListener = scanStatusRef.on('value', snap => {
-    const status = snap.val();
-    if (!status) return;
-    if (status.status === 'scanning') showStatus('Sender is scanning media…');
-    if (status.status === 'complete') showStatus(`Scan complete: ${status.uploaded || 0} thumbnails uploaded, ${status.failed || 0} failed`);
-  });
-  mediaListener = mediaRef.on('value', (snap) => {
-    mediaItems = [];
-    snap.forEach(child => {
-      mediaItems.push({ id: child.key, ...child.val() });
-    });
-    mediaItems.sort((a, b) => (b.date || 0) - (a.date || 0));
-    renderMediaGrid();
-  });
-}
 
-function renderMediaGrid() {
-  mediaGrid.innerHTML = '';
-  const filtered = mediaItems.filter(m => m.type === currentMediaTab);
-
-  if (filtered.length === 0) {
-    mediaGrid.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:40px;">No media yet. Tap scan to load.</p>';
-    return;
-  }
-
-  const isWifi = currentDeviceData?.networkType === 'wifi';
-
-  filtered.forEach(item => {
-    const div = document.createElement('div');
-    div.className = 'media-item';
-    div.style.cssText = 'position:relative;aspect-ratio:1;background:#1e293b;border-radius:8px;overflow:hidden;cursor:pointer;';
-
-    if (item.thumbnail) {
-      const image = document.createElement('img');
-      image.src = item.thumbnail;
-      image.alt = item.name || 'Media thumbnail';
-      image.loading = 'lazy';
-      image.style.cssText = 'width:100%;height:100%;object-fit:cover;';
-      image.onerror = () => {
-        image.remove();
-        const fallback = document.createElement('div');
-        fallback.textContent = 'Preview unavailable';
-        fallback.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:12px;text-align:center;';
-        div.prepend(fallback);
-      };
-      div.appendChild(image);
-    } else {
-      const fallback = document.createElement('div');
-      fallback.textContent = item.name || 'Thumbnail pending';
-      fallback.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:12px;text-align:center;';
-      div.appendChild(fallback);
-    }
-
-    const sizeLabel = document.createElement('div');
-    sizeLabel.style.cssText = 'position:absolute;bottom:4px;right:4px;background:rgba(0,0,0,0.7);color:white;font-size:10px;padding:2px 4px;border-radius:4px;';
-    sizeLabel.textContent = formatSize(item.size);
-    div.appendChild(sizeLabel);
-
-    if (item.type === 'video') {
-      const durLabel = document.createElement('div');
-      durLabel.style.cssText = 'position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.7);color:white;font-size:10px;padding:2px 4px;border-radius:4px;';
-      durLabel.textContent = formatDuration(item.duration);
-      div.appendChild(durLabel);
-    }
-
-    div.addEventListener('click', () => showMediaOptions(item));
-    mediaGrid.appendChild(div);
-  });
-}
 
 function showMediaOptions(item) {
   const isMobile = currentDeviceData?.networkType === 'mobile';

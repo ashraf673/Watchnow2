@@ -210,8 +210,25 @@ async function handle(request, env) {
   if (photoListMatch && request.method === "GET") {
     const uid = await ownerUid(request, env);
     if (!uid) return fail("Owner authentication required", 401);
-    const result = await env.DB.prepare("SELECT photo_id AS photoId,device_id AS deviceId,file_name AS fileName,mime_type AS mimeType,byte_size AS byteSize,original_byte_size AS originalByteSize,CASE WHEN original_drive_file_id IS NULL THEN 0 ELSE 1 END AS hasOriginal,captured_at AS capturedAt,uploaded_at AS uploadedAt,expires_at AS expiresAt,width,height FROM photos WHERE owner_uid=? AND device_id=? AND status='ready' ORDER BY uploaded_at DESC LIMIT 500").bind(uid,photoListMatch[1]).all();
-    return json({ photos: result.results || [] });
+    const result = await env.DB.prepare("SELECT photo_id AS photoId,device_id AS deviceId,drive_file_id AS driveFileId,original_drive_file_id AS originalDriveFileId,file_name AS fileName,mime_type AS mimeType,byte_size AS byteSize,original_byte_size AS originalByteSize,CASE WHEN original_drive_file_id IS NULL THEN 0 ELSE 1 END AS hasOriginal,captured_at AS capturedAt,uploaded_at AS uploadedAt,expires_at AS expiresAt,width,height FROM photos WHERE owner_uid=? AND device_id=? AND status='ready' ORDER BY uploaded_at DESC LIMIT 500").bind(uid,photoListMatch[1]).all();
+    const photos = [];
+    for (const photo of result.results || []) {
+      const check = await driveFetch(env, `/files/${encodeURIComponent(photo.driveFileId)}?fields=id,trashed`);
+      if (check.status === 404) {
+        await env.DB.prepare("DELETE FROM photos WHERE photo_id=? AND owner_uid=?").bind(photo.photoId,uid).run();
+        continue;
+      }
+      if (!check.ok) return fail("Could not verify Google Drive photo files",502);
+      const driveFile = await check.json();
+      if (driveFile.trashed) {
+        await env.DB.prepare("DELETE FROM photos WHERE photo_id=? AND owner_uid=?").bind(photo.photoId,uid).run();
+        continue;
+      }
+      delete photo.driveFileId;
+      delete photo.originalDriveFileId;
+      photos.push(photo);
+    }
+    return json({ photos });
   }
 
 
