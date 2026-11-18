@@ -336,6 +336,51 @@ async function handle(request, env) {
     return json({ photoId, uploadedAt: now, assetType: session.asset_type, expiresAt: null },session.asset_type === "original" ? 200 : 201);
   }
 
+  const singleDeleteMatch = path.match(/^\/v1\/photos\/([A-Za-z0-9_-]+)$/);
+  if (singleDeleteMatch && request.method === "DELETE") {
+    const uid = await ownerUid(request, env);
+    if (!uid) return fail("Owner authentication required", 401);
+    const photo = await env.DB.prepare(
+      "SELECT photo_id,drive_file_id,original_drive_file_id FROM photos WHERE photo_id=? AND owner_uid=?"
+    ).bind(singleDeleteMatch[1], uid).first();
+    if (!photo) return fail("Photo not found", 404);
+    const ids = [...new Set([photo.drive_file_id, photo.original_drive_file_id].filter(Boolean))];
+    for (const id of ids) {
+      const response = await driveFetch(env, "/files/" + encodeURIComponent(id), { method: "DELETE" });
+      if (!response.ok && response.status !== 404) return fail("Drive deletion failed; backup record was retained", 502);
+    }
+    await env.DB.prepare("DELETE FROM photos WHERE photo_id=? AND owner_uid=?").bind(photo.photo_id, uid).run();
+    return json({ ok: true, deleted: [photo.photo_id] });
+  }
+
+  if (path === "/v1/photos/bulk-delete" && request.method === "POST") {
+    const uid = await ownerUid(request, env);
+    if (!uid) return fail("Owner authentication required", 401);
+    const input = await bodyJson(request) || {};
+    if (!Array.isArray(input.photoIds) || input.photoIds.length < 1 || input.photoIds.length > 500) return fail("photoIds must contain 1 to 500 ids");
+    const photoIds = [...new Set(input.photoIds.map(String))];
+    const marks = photoIds.map(() => "?").join(",");
+    const rows = await env.DB.prepare(
+      "SELECT photo_id,drive_file_id,original_drive_file_id FROM photos WHERE owner_uid=? AND photo_id IN (" + marks + ")"
+    ).bind(uid, ...photoIds).all();
+    const deleted = [], failed = [];
+    for (const photo of rows.results || []) {
+      let ok = true;
+      const ids = [...new Set([photo.drive_file_id, photo.original_drive_file_id].filter(Boolean))];
+      for (const id of ids) {
+        const response = await driveFetch(env, "/files/" + encodeURIComponent(id), { method: "DELETE" });
+        if (!response.ok && response.status !== 404) { ok = false; break; }
+      }
+      if (ok) {
+        await env.DB.prepare("DELETE FROM photos WHERE photo_id=? AND owner_uid=?").bind(photo.photo_id, uid).run();
+        deleted.push(photo.photo_id);
+      } else failed.push(photo.photo_id);
+    }
+    const missing = photoIds.filter(id => !(rows.results || []).some(photo => photo.photo_id === id));
+    failed.push(...missing);
+    return json({ ok: failed.length === 0, deleted, failed }, failed.length ? 207 : 200);
+  }
+
   const contentMatch = path.match(/^\/v1\/photos\/([A-Za-z0-9_-]+)\/content$/);
   if (contentMatch && request.method === "GET") {
     const uid = await ownerUid(request, env);
