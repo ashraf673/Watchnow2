@@ -1,0 +1,21 @@
+name: Validate Watchnow2
+on:
+  push:
+    branches:
+      - feature/original-upload-controls
+  pull_request:
+    branches:
+      - main
+      - feature/original-upload-controls
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check Worker syntax
+        run: node --check backend/worker/src/index.js
+      - name: Check browser application syntax
+        run: node --check js/app.js
